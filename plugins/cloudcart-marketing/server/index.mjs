@@ -3,21 +3,23 @@
 // (/api/v2) with an API key. Strictly read-only: it can only send GET requests
 // and there is no setting to change that. No dependencies.
 import { createInterface } from 'node:readline';
-import { RESOURCES, loadConfig, parsePath, buildSearch, getFromStore } from './lib.mjs';
+import { RESOURCES, loadConfig, saveConfig, normalizeStore, parsePath, buildSearch, getFromStore } from './lib.mjs';
 import { openConnectPage } from './connect.mjs';
 import { readFileSync } from 'node:fs';
 import { postStart, postSave, postAddImage, postShow } from './posts.mjs';
+import { installFromLink, libraryStatus, isRefreshing, getLibraryLink, setLibraryLink } from './library-sync.mjs';
 
 const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.5.0' };
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.7.0' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
   'The store is not connected yet. Call the cloudcart_connect tool: it opens a page in the browser where the user ' +
-  'enters the store address and API key. Do not ask the user to paste the key into this chat.';
+  'enters the store address and API key. (The same settings are also on this plugin\'s page in ChatGPT.) ' +
+  'Do not ask the user to paste the key into this chat.';
 
 const TOOLS = [
   {
@@ -31,7 +33,7 @@ const TOOLS = [
     name: 'cloudcart_connect',
     title: 'Connect the CloudCart store',
     description:
-      'Open a page in the user\'s browser where they enter the store address and API key to connect (or reconnect) the store. ' +
+      'Open a page in the user\'s browser where they enter the store address, the API key and, optionally, a Google Drive link to their post library, to connect (or reconnect) the store. ' +
       'Use it when cloudcart_status says the store is not connected or the key was rejected, or when the user asks to connect or change the store. ' +
       'The key is typed into that page, never into the chat. Returns immediately; ask the user to say when they have finished, then call cloudcart_status.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -141,6 +143,19 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: 'post_library_set',
+    title: 'Update the post library',
+    description:
+      'Download the shop\'s post library (its past Facebook posts and reference images, used for voice and look) from a Google Drive link and install it on this computer. ' +
+      'Pass "url" when the user gives a Google Drive link to the library. Call without "url" to download the latest version from the saved link when the user asks to update the library. Takes up to a minute.',
+    inputSchema: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Google Drive share link to the library zip. Omit to refresh from the saved link.' } },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
     name: 'post_show',
     title: 'Show the post as a card',
     description:
@@ -162,6 +177,96 @@ const TOOLS = [
       'openai/toolInvocation/invoking': 'Preparing the preview…',
       'openai/toolInvocation/invoked': 'Preview ready.',
     },
+  },
+];
+
+// --- Settings on the plugin's page in ChatGPT -----------------------------------------------
+const SETTINGS_CAPABILITY = { 'openai/settings': { readTool: 'settings_read', updateTool: 'settings_update' } };
+const KEY_SAVED = '•••••••• (saved)';
+
+function settingsValues() {
+  const cfg = loadConfig();
+  return { store: cfg.store || '', apiKey: cfg.apiKey ? KEY_SAVED : '', libraryUrl: getLibraryLink() };
+}
+
+function settingsRead() {
+  return {
+    schema: {
+      type: 'object',
+      properties: {
+        store: { type: 'string', title: 'Store address', description: 'For example mystore.cloudcart.com', maxLength: 253 },
+        apiKey: {
+          type: 'string',
+          title: 'API key',
+          description: 'From your CloudCart admin: Settings → API Keys. Saved on this computer only and shown hidden once saved.',
+          maxLength: 400,
+        },
+        libraryUrl: {
+          type: 'string',
+          title: 'Post library link',
+          description: 'Optional. A Google Drive link to your past posts, so new posts follow your page\'s voice and look. Downloads in the background after you save it.',
+          maxLength: 500,
+        },
+      },
+    },
+    values: settingsValues(),
+    layout: [
+      { kind: 'group', title: 'Store', items: [{ kind: 'property', property: 'store' }, { kind: 'property', property: 'apiKey' }, { kind: 'tool', tool: 'cloudcart_status', description: 'Check that the store and the post library are working.' }] },
+      { kind: 'group', title: 'Facebook posts', items: [{ kind: 'property', property: 'libraryUrl' }, { kind: 'tool', tool: 'post_library_set', description: 'Download the newest version of the post library now.' }] },
+    ],
+  };
+}
+
+function settingsUpdate(args) {
+  const set = args?.set;
+  if (!set || typeof set !== 'object' || Array.isArray(set)) throw Object.assign(new Error('"set" must be an object of changed settings.'), { expected: true });
+  const cfg = loadConfig();
+  let { store, apiKey } = cfg;
+  if ('store' in set) {
+    store = normalizeStore(String(set.store));
+    if (!store) throw Object.assign(new Error('That does not look like a store address. Use something like mystore.cloudcart.com.'), { expected: true });
+  }
+  // The hidden placeholder, or an empty field, means "keep the saved key".
+  if ('apiKey' in set && String(set.apiKey).trim() && String(set.apiKey).trim() !== KEY_SAVED) apiKey = String(set.apiKey).trim();
+  if (store !== cfg.store || apiKey !== cfg.apiKey) saveConfig({ store: store || '', apiKey: apiKey || '' });
+  if ('libraryUrl' in set) setLibraryLink(String(set.libraryUrl));
+  return { values: settingsValues() };
+}
+
+const SETTINGS_TOOLS = [
+  {
+    name: 'settings_read',
+    title: 'Read plugin settings',
+    description: 'Used by the plugin settings page. Returns the settings schema and current values; the API key is never returned.',
+    inputSchema: { type: 'object', additionalProperties: false },
+    outputSchema: {
+      type: 'object',
+      properties: { schema: { type: 'object' }, values: { type: 'object' }, layout: { type: 'array', items: { type: 'object' } } },
+      required: ['schema', 'values'],
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  {
+    name: 'settings_update',
+    title: 'Update plugin settings',
+    description: 'Used by the plugin settings page to save changed settings on this computer.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        set: {
+          type: 'object',
+          properties: { store: { type: 'string' }, apiKey: { type: 'string' }, libraryUrl: { type: 'string' } },
+          minProperties: 1,
+          additionalProperties: false,
+        },
+      },
+      required: ['set'],
+      additionalProperties: false,
+    },
+    outputSchema: { type: 'object', properties: { values: { type: 'object' } }, required: ['values'] },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    _meta: { ui: { visibility: ['app'] } },
   },
 ];
 
@@ -188,7 +293,7 @@ async function status() {
     if (r.status >= 400 || !r.json) return fail(`Store: ${cfg.store}. Unexpected response (HTTP ${r.status}).`);
     const count = r.json?.meta?.total_count;
     return ok(
-      `Connected to ${cfg.store}${count !== undefined ? ` (${count} products)` : ''}. Read-only: this plugin cannot change anything in the store.`,
+      `Connected to ${cfg.store}${count !== undefined ? ` (${count} products)` : ''}. Read-only: this plugin cannot change anything in the store. ${libraryStatus()}`,
     );
   } catch (e) {
     return fail(`Store: ${cfg.store}. Could not reach the store: ${e.message}`);
@@ -244,7 +349,8 @@ async function handle(msg) {
     case 'initialize':
       return {
         protocolVersion: msg.params?.protocolVersion || '2025-06-18',
-        capabilities: { tools: {}, resources: {} },
+        // Settings shown on the plugin's page in ChatGPT (OpenAI MCP Extensions: structured settings).
+        capabilities: { tools: {}, resources: {}, extensions: SETTINGS_CAPABILITY, experimental: SETTINGS_CAPABILITY },
         serverInfo: SERVER_INFO,
         instructions:
           'Reads data from one CloudCart store through its REST API. Call cloudcart_status first. Strictly read-only.',
@@ -252,7 +358,7 @@ async function handle(msg) {
     case 'ping':
       return {};
     case 'tools/list':
-      return { tools: TOOLS };
+      return { tools: [...TOOLS, ...SETTINGS_TOOLS] };
     case 'resources/list':
       return { resources: [CARD_RESOURCE] };
     case 'resources/templates/list':
@@ -275,6 +381,22 @@ async function handle(msg) {
       if (name === 'cloudcart_status') return status();
       if (name === 'cloudcart_get') return get(msg.params?.arguments);
       if (name === 'cloudcart_connect') return connect();
+      if (name === 'settings_read') return { content: [], structuredContent: settingsRead() };
+      if (name === 'settings_update') {
+        try {
+          return { content: [], structuredContent: settingsUpdate(msg.params?.arguments) };
+        } catch (e) {
+          return fail(e.expected ? e.message : `The settings could not be saved: ${e.message}`);
+        }
+      }
+      if (name === 'post_library_set') {
+        try {
+          const r = await installFromLink(typeof msg.params?.arguments?.url === 'string' ? msg.params.arguments.url : undefined);
+          return ok(`Post library installed: ${r.posts} posts and ${r.images} reference images${r.page ? ` from ${r.page}` : ''}.`);
+        } catch (e) {
+          return fail(e.expected ? e.message : `The library could not be installed: ${e.message}`);
+        }
+      }
       if (name === 'post_show') {
         try {
           const r = postShow(msg.params?.arguments || {});
@@ -302,11 +424,16 @@ async function handle(msg) {
 const send = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+// A background library refresh may still be unpacking: give it up to two minutes.
+function exitWhenIdle(waited = 0) {
+  if (!isRefreshing() || waited > 120_000) process.exit(0);
+  setTimeout(() => exitWhenIdle(waited + 500), 500);
+}
 let pending = 0;
 let closing = false;
 rl.on('close', () => {
   closing = true; // host went away: finish what is in flight, then do not linger
-  if (pending === 0) process.exit(0);
+  if (pending === 0) exitWhenIdle();
 });
 rl.on('line', async (line) => {
   if (!line.trim()) return;
@@ -326,5 +453,5 @@ rl.on('line', async (line) => {
     send({ jsonrpc: '2.0', id: msg.id, error: { code: e.code || -32603, message: e.message } });
   }
   pending--;
-  if (closing && pending === 0) process.exit(0);
+  if (closing && pending === 0) exitWhenIdle();
 });

@@ -7,6 +7,7 @@ import { join, extname, basename, sep } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { loadConfig, getFromStore } from './lib.mjs';
+import { refreshIfStale } from './library-sync.mjs';
 import { loadLibrary, rank, selectExamples, pickTemplate, selectStyleRefs, performanceInsights, exampleForWriter } from './library.mjs';
 
 export const POSTS_ROOT = process.env.CLOUDCART_POSTS_DIR || join(homedir(), 'Documents', 'CloudCart Marketing', 'posts');
@@ -169,11 +170,12 @@ export async function postStart(args) {
   if (!library) {
     result.library = null;
     result.library_note =
-      'No post library is installed, so there are no past posts or style reference images. Write in a clear, friendly shop voice and describe the look fully in the image prompt.';
+      'No post library is installed, so there are no past posts or style reference images. Ask the user once whether they have a Google Drive link to their post library; if they do, call post_library_set with it and then post_start again. Otherwise write in a clear, friendly shop voice and describe the look fully in the image prompt.';
     result.baseline = { template: null, folder: join(folder, 'baseline'), style_refs: [] };
     return result;
   }
 
+  refreshIfStale(); // newer library on Drive? fetch it in the background for next time
   const ranked = rank(library, product, productTypes);
   const template = library.meta.templates?.[args?.template] !== undefined ? args.template : pickTemplate(library);
   const refs = selectStyleRefs(library, ranked, template, product, 2);

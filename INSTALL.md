@@ -64,15 +64,15 @@ Find the line for `cloudcart-marketing@cloudcart-marketing`. It must say `instal
 
 The plugin can write Facebook posts in the shop's own voice and look if it has the shop's "post library" (past posts and a few of their images). It is not part of the plugin download.
 
-Ask the user whether they were given a file called `post-library.zip`. If yes, ask where it is (usually the Downloads folder) and run, with the real path:
+Ask the user whether they were given a Google Drive link to their post library. If yes, run this with their link in the quotes (it downloads about 40 MB and can take a minute):
 
 ```
-mkdir -p ~/.config/cloudcart-marketing/library
-unzip -o -q "/path/to/post-library.zip" -d ~/.config/cloudcart-marketing/library
-ls ~/.config/cloudcart-marketing/library
+node ~/.codex/plugins/cache/cloudcart-marketing/cloudcart-marketing/*/server/library-cli.mjs set "<the Google Drive link>"
 ```
 
-The last command must list `index.json` and `images`. If they have no such file, skip this step: the plugin still works, with a generic style.
+It must end with a line starting `Installed:`. If it reports an error, show the user the message and continue with the next step; the library can be set later from the chat. If they have no link, skip this step: the plugin still works, with a generic style.
+
+The plugin checks the same link for a newer library by itself from time to time.
 
 ### Step 7 — Tell the user what to do next
 
@@ -84,7 +84,7 @@ Say this, in their language:
 4. A page opens in the browser. Enter the store address and the API key. The key is created in the CloudCart admin under **Settings → API Keys → Create API Key**.
 5. When the page says the store is connected, go back to the chat and paste a product link with: *Make a Facebook post for this product*. Or ask, for example: *What are my best-selling products this month?*
 
-Also tell them: the plugin can only read from the store. It cannot change products, prices, orders or anything else.
+Also tell them: the plugin can only read from the store. It cannot change products, prices, orders or anything else. The store address, API key and library link can be seen and changed later on the plugin's page in ChatGPT (Plugins → CloudCart Marketing).
 
 ## Updating later
 

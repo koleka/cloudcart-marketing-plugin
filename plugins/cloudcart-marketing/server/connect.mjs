@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { loadConfig, checkConnection, saveConfig } from './lib.mjs';
+import { parseDriveId, installFromLink, librarySource, getLibraryLink } from './library-sync.mjs';
 
 const LIFETIME_MS = 15 * 60 * 1000;
 let active = null; // { url, server, timer }
@@ -42,7 +43,7 @@ function openInBrowser(url) {
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-function page(currentStore) {
+function page(currentStore, hasKey, currentLibrary) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -62,6 +63,9 @@ function page(currentStore) {
   p { margin:0 0 18px; color:var(--muted); }
   label { display:block; font-weight:600; margin:18px 0 6px; }
   .hint { font-size:14px; color:var(--muted); margin:6px 0 0; }
+  .opt { font-weight:400; color:var(--muted); }
+  #libnote { margin-top:10px; font-weight:600; }
+  #libnote.warn { color:var(--err); } #libnote.good { color:var(--ok); }
   input { width:100%; padding:11px 12px; font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:9px; }
   input:focus { outline:2px solid var(--accent); outline-offset:1px; }
   button { margin-top:24px; width:100%; padding:12px; font:inherit; font-weight:600; color:#fff; background:var(--accent); border:0; border-radius:9px; cursor:pointer; }
@@ -84,8 +88,12 @@ function page(currentStore) {
       <input id="store" name="store" required placeholder="mystore.cloudcart.com" value="${escapeHtml(currentStore || '')}" spellcheck="false" autocapitalize="off">
 
       <label for="key" data-t="keyLabel">API key</label>
-      <input id="key" name="key" type="password" required autocomplete="off" spellcheck="false">
+      <input id="key" name="key" type="password" ${hasKey ? '' : 'required'} autocomplete="off" spellcheck="false" data-saved="${hasKey ? '1' : ''}">
       <div class="hint" data-t="keyHint">In your CloudCart admin: Settings → API Keys → Create API Key.</div>
+
+      <label for="library"><span data-t="libLabel">Post library link</span> <span class="opt" data-t="optional">(optional)</span></label>
+      <input id="library" name="library" placeholder="https://drive.google.com/file/d/…" value="${escapeHtml(currentLibrary || '')}" spellcheck="false" autocapitalize="off">
+      <div class="hint" data-t="libHint">A Google Drive link to your past posts. With it, new posts follow your page's own voice and look.</div>
 
       <button id="btn" type="submit" data-t="button">Connect</button>
       <div id="msg" role="status"></div>
@@ -94,6 +102,7 @@ function page(currentStore) {
     <div id="done">
       <div class="big">✓</div>
       <h1 id="doneTitle"></h1>
+      <div id="libnote"></div>
       <p data-t="doneText">You can close this tab and go back to the chat.</p>
     </div>
   </div>
@@ -105,7 +114,13 @@ const T = {
     intro: 'The assistant will be able to read your products, orders and customers. It cannot change anything in the store.',
     storeLabel: 'Store address', keyLabel: 'API key',
     keyHint: 'In your CloudCart admin: Settings → API Keys → Create API Key.',
-    button: 'Connect', checking: 'Checking…',
+    button: 'Connect', checking: 'Checking…', downloading: 'Checking and downloading the library… this can take a minute',
+    libLabel: 'Post library link', optional: '(optional)',
+    libHint: 'A Google Drive link to your past posts. With it, new posts follow your page\'s own voice and look.',
+    keySaved: 'A key is already saved. Leave empty to keep it.',
+    libOk: (n) => 'Post library downloaded: ' + n + ' posts.',
+    libFail: 'The store is connected, but the post library could not be downloaded. Check the link and that the file is shared as "Anyone with the link".',
+    bad_library: 'The post library link is not a Google Drive file link.',
     foot: 'The key is saved only on this computer. It is not sent to the chat.',
     doneText: 'You can close this tab and go back to the chat.',
     connected: (s) => 'Connected to ' + s,
@@ -120,7 +135,13 @@ const T = {
     intro: 'Асистентът ще може да чете вашите продукти, поръчки и клиенти. Не може да променя нищо в магазина.',
     storeLabel: 'Адрес на магазина', keyLabel: 'API ключ',
     keyHint: 'В администрацията на CloudCart: Настройки → API ключове → Създай API ключ.',
-    button: 'Свържи', checking: 'Проверка…',
+    button: 'Свържи', checking: 'Проверка…', downloading: 'Проверка и изтегляне на библиотеката… може да отнеме минута',
+    libLabel: 'Линк към библиотеката с постове', optional: '(по желание)',
+    libHint: 'Google Drive линк към предишните ви постове. С него новите постове следват гласа и визията на вашата страница.',
+    keySaved: 'Вече има записан ключ. Оставете празно, за да го запазите.',
+    libOk: (n) => 'Библиотеката с постове е изтеглена: ' + n + ' поста.',
+    libFail: 'Магазинът е свързан, но библиотеката с постове не можа да се изтегли. Проверете линка и дали файлът е споделен с „Всеки с линка“.',
+    bad_library: 'Линкът към библиотеката не е Google Drive линк към файл.',
     foot: 'Ключът се записва само на този компютър. Не се изпраща в чата.',
     doneText: 'Можете да затворите този раздел и да се върнете в чата.',
     connected: (s) => 'Свързано с ' + s,
@@ -134,17 +155,18 @@ const T = {
 const t = T[(navigator.language || 'en').toLowerCase().startsWith('bg') ? 'bg' : 'en'];
 document.title = t.title;
 document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t[el.dataset.t]; });
+if (document.getElementById('key').dataset.saved) document.getElementById('key').placeholder = t.keySaved;
 
 const form = document.getElementById('form'), btn = document.getElementById('btn'), msg = document.getElementById('msg');
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
-  btn.disabled = true; btn.textContent = t.checking; msg.className = ''; msg.textContent = '';
+  btn.disabled = true; btn.textContent = form.library.value.trim() ? t.downloading : t.checking; msg.className = ''; msg.textContent = '';
   let result;
   try {
     const res = await fetch(location.pathname, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ store: form.store.value, apiKey: form.key.value }),
+      body: JSON.stringify({ store: form.store.value, apiKey: form.key.value, libraryUrl: form.library.value }),
     });
     result = await res.json();
   } catch {
@@ -153,6 +175,9 @@ form.addEventListener('submit', async (e) => {
   if (result.ok) {
     form.style.display = 'none';
     document.getElementById('doneTitle').textContent = t.connected(result.store);
+    const note = document.getElementById('libnote');
+    if (result.library && result.library.ok) { note.className = 'good'; note.textContent = t.libOk(result.library.posts); }
+    else if (result.library) { note.className = 'warn'; note.textContent = t.libFail; }
     document.getElementById('done').style.display = 'block';
   } else {
     msg.className = 'err'; msg.textContent = t[result.reason] || t.bad_response;
@@ -203,7 +228,8 @@ export async function openConnectPage() {
           'X-Frame-Options': 'DENY',
           'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'",
         });
-        res.end(page(loadConfig().store));
+        const saved = loadConfig();
+        res.end(page(saved.store, !!saved.apiKey, getLibraryLink()));
         return;
       }
       if (req.method === 'POST') {
@@ -220,18 +246,34 @@ export async function openConnectPage() {
           json(400, { ok: false, reason: 'bad_response' });
           return;
         }
-        const check = await checkConnection(body?.store, body?.apiKey);
+        // An empty key field means "keep the saved key".
+        const apiKey = String(body?.apiKey || '').trim() || loadConfig().apiKey;
+        const libraryUrl = String(body?.libraryUrl || '').trim();
+        if (libraryUrl && !parseDriveId(libraryUrl)) {
+          json(200, { ok: false, reason: 'bad_library' });
+          return;
+        }
+        const check = await checkConnection(body?.store, apiKey);
         if (!check.ok) {
           json(200, { ok: false, reason: check.reason });
           return;
         }
         try {
-          saveConfig({ store: check.store, apiKey: String(body.apiKey).trim() });
+          saveConfig({ store: check.store, apiKey });
         } catch {
           json(200, { ok: false, reason: 'bad_response' });
           return;
         }
-        json(200, { ok: true, store: check.store });
+        // The store is connected either way; the library is a bonus and may fail on its own.
+        let library;
+        if (libraryUrl && libraryUrl !== librarySource()?.url) {
+          try {
+            library = { ok: true, posts: (await installFromLink(libraryUrl)).posts };
+          } catch {
+            library = { ok: false };
+          }
+        }
+        json(200, { ok: true, store: check.store, library });
         setTimeout(close, 500); // one successful use, then the page is gone
         return;
       }

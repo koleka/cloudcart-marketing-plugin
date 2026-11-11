@@ -9,7 +9,7 @@
 //   index.json, images/
 //
 // Usage:
-//   node tools/build-post-library.mjs <source-folder> [--out <folder>] [--page "Name"]
+//   node tools/build-post-library.mjs <source-folder> [--out <folder>] [--zip post-library.zip] [--page "Name"]
 //        [--about "what the shop sells"] [--shop-url https://shop.example.com]
 //
 // The library is the shop's own data. It is not part of this repository.
@@ -24,6 +24,7 @@ const opt = (name, fallback) => {
   return i >= 0 ? args.splice(i, 2)[1] : fallback;
 };
 const out = resolve(opt('out', join(homedir(), '.config', 'cloudcart-marketing', 'library')));
+const zipPath = opt('zip', '');
 const page = opt('page', '');
 const about = opt('about', '');
 let shopUrl = opt('shop-url', '');
@@ -138,3 +139,10 @@ console.log(`Library written to ${out}`);
 console.log(`  ${records.length} posts, index ${mb(statSync(join(out, 'index.json')).size)}`);
 console.log(`  ${Object.values(shipped).reduce((a, b) => a + b, 0)} images, ${mb(bytes)}`);
 console.log(`  shop: ${shopUrl || '(unknown)'}  page: ${page || '(not set)'}`);
+
+if (zipPath) {
+  const dest = resolve(zipPath);
+  rmSync(dest, { force: true });
+  execFileSync('zip', ['-q', '-r', dest, 'index.json', 'images'], { cwd: out });
+  console.log(`  zip for sharing: ${dest} (${mb(statSync(dest).size)})`);
+}

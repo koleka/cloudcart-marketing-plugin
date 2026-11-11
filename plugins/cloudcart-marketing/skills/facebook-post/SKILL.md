@@ -31,7 +31,9 @@ Turn one product into ready Facebook posts: a caption and an image, as a main va
 - `baseline.template`: the image template the page uses most for product posts now. `templates`: all template codes with descriptions.
 - `folder`: the working folder. Pass it to the other post tools.
 
-If there is no post library (`library: null`), there are no examples or style references: write in a clear, friendly shop voice, describe the look fully in the image prompt, and still use the product photo as a reference image.
+If there is no post library (`library: null`), ask the user once whether they have a Google Drive link to their post library. If they give one, call `post_library_set` with it (it takes up to a minute) and then `post_start` again. If they do not, carry on without it: write in a clear, friendly shop voice, describe the look fully in the image prompt, and still use the product photo as a reference image.
+
+If the user asks to update or refresh the post library, call `post_library_set` without a link.
 
 ## Step 2 — Propose ideas
 
