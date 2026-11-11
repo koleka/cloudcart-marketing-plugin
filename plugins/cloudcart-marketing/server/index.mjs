@@ -18,7 +18,7 @@ const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.9.0' };
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.10.0' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
@@ -78,14 +78,19 @@ const TOOLS = [
     name: 'post_start',
     title: 'Start a Facebook post for a product',
     description:
-      'First step of making a Facebook post for one product. Reads the product from the store (name, brand, category, description, price), ' +
-      'creates a working folder on this computer, downloads the product photo into it, and returns the page\'s own past posts most relevant ' +
-      'to this product (captions, engagement, image analysis), what performed well, the image template to use for the baseline variant, ' +
-      'and style reference image files copied into the folder. Does not change the store.',
+      'First step of making a Facebook post. "kind" chooses what the post is about: "product" (one product, the default), "multi_product" (2-4 products), ' +
+      '"kit" (a kit or set), "education" (a useful tip or explanation on a "topic") or "seasonal" (a holiday or seasonal "occasion"). ' +
+      'Reads the product(s) from the store (name, brand, category, description, price), creates a working folder on this computer, downloads the product photos into it, ' +
+      'and returns the page\'s own past posts of the same kind most relevant to this one (captions, engagement, image analysis), what performed well, ' +
+      'the image template to use for the baseline variant, and style reference image files copied into the folder. Does not change the store.',
     inputSchema: {
       type: 'object',
       properties: {
-        product_url: { type: 'string', description: 'The product page link the user gave. Preferred.' },
+        kind: { type: 'string', enum: ['product', 'multi_product', 'kit', 'education', 'seasonal'], description: 'Default "product".' },
+        product_url: { type: 'string', description: 'The product page link the user gave. For kind "product"; optional single product for "education" and "seasonal".' },
+        product_urls: { type: 'array', items: { type: 'string' }, description: 'Product page links for "multi_product" (2-4) and "kit" (1-4).' },
+        topic: { type: 'string', description: 'What an "education" or "seasonal" post is about, in the user\'s words.' },
+        occasion: { type: 'string', description: 'For "seasonal": one of none, summer, christmas, new_year, womens_day, valentines, black_friday, easter, back_to_school, mothers_day, other.' },
         product_id: { type: 'string', description: 'Product ID, if there is no link.' },
         product_types: {
           type: 'array',

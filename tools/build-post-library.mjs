@@ -36,7 +36,7 @@ if (!src || !existsSync(join(src, 'fb_export_output', 'posts.json'))) {
 
 // How many images to ship per template. The two formats used for product ads today get more.
 const CURRENT_AD_TEMPLATES = ['ai_product_ad_infographic', 'ai_model_product_ad'];
-const PER_TEMPLATE = (t) => (CURRENT_AD_TEMPLATES.includes(t) ? 16 : 4);
+const PER_TEMPLATE = (t) => (CURRENT_AD_TEMPLATES.includes(t) ? 16 : 6);
 
 const exportDir = join(src, 'fb_export_output');
 const posts = new Map(JSON.parse(readFileSync(join(exportDir, 'posts.json'), 'utf8')).map((p) => [p.id, p]));
@@ -74,6 +74,9 @@ for (const name of readdirSync(join(src, 'enrichment'))) {
     featured_products: e.featured_products || [],
     featured_brands: e.featured_brands || [],
     why_it_works: e.why_it_works || null,
+    topic: e.topic || null,
+    occasion: e.occasion || null,
+    caption_structure: e.caption?.structure || null,
     images: (e.images || []).slice(0, 2).map((img) => ({
       template: img.template || 'other',
       scene_description: img.scene_description || null,

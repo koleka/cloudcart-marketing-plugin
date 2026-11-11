@@ -194,3 +194,65 @@ export function exampleForWriter(ex) {
     permalink: ex.post.permalink,
   };
 }
+
+// --- Posts that are not about one product -------------------------------------------------
+
+/** Which of the page's post types serve as examples for each kind of post. */
+export const KIND_POST_TYPES = {
+  multi_product: ['multi_product_promo', 'kit_promo'],
+  kit: ['kit_promo', 'multi_product_promo'],
+  education: ['education'],
+  seasonal: ['seasonal_holiday'],
+};
+
+/**
+ * Rank the page's posts of the matching type for a kit, multi-product, educational or seasonal post.
+ * subject: { kind, topic, occasion, products: [{ url, name, brand }] }
+ */
+export function rankForKind(index, subject) {
+  const wanted = new Set(KIND_POST_TYPES[subject.kind] || []);
+  const candidates = index.posts.filter((p) => wanted.has(p.post_type));
+  if (!candidates.length) return [];
+  const newest = time(index.posts[0]);
+  const paths = new Set((subject.products || []).map((pr) => urlPath(pr.url)).filter(Boolean));
+  const want = tokens(`${subject.topic || ''} ${(subject.products || []).map((pr) => `${pr.name} ${pr.brand || ''}`).join(' ')}`);
+  const primary = (KIND_POST_TYPES[subject.kind] || [])[0];
+
+  return candidates
+    .map((post) => {
+      let sim = 0;
+      if (want.size) {
+        const have = tokens(`${post.topic || ''} ${post.featured_products.join(' ')} ${post.featured_brands.join(' ')} ${post.message.slice(0, 400)}`);
+        let hit = 0;
+        for (const t of want) if (have.has(t)) hit++;
+        sim = hit / want.size;
+      }
+      const same = post.links.some((l) => paths.has(urlPath(l)));
+      const sameOccasion = !!subject.occasion && subject.occasion !== 'none' && post.occasion === subject.occasion;
+      const pct = post.pct || 0;
+      const ageDays = (newest - time(post)) / DAY;
+      const score =
+        W_SIMILARITY * sim +
+        (W_PERFORMANCE * pct) / 100 +
+        W_RECENCY * 0.5 ** (ageDays / RECENCY_HALF_LIFE_DAYS) +
+        (post.post_type === primary ? 0.1 : 0) +
+        (sameOccasion ? BONUS_SAME_TYPE : 0) +
+        (same ? BONUS_SAME_PRODUCT : 0);
+      const match = [same ? 'same product' : '', sameOccasion ? `occasion ${post.occasion}` : '', post.post_type, `topic match ${sim.toFixed(2)}`, `pct ${pct}`, post.date.slice(0, 7)]
+        .filter(Boolean)
+        .join(' · ');
+      // "shared" marks the closest examples, as product types do for single-product posts.
+      return { post, score, match, same, shared: post.post_type === primary ? [post.post_type] : [] };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+/** The image template used most among the best-matching posts of this kind, favouring templates that have reference images. */
+export function pickTemplateForKind(index, ranked, top = 30) {
+  const counts = {};
+  for (const { post } of ranked.slice(0, top)) {
+    const img = post.images[0];
+    if (img?.template && img.template !== 'other') counts[img.template] = (counts[img.template] || 0) + (img.file ? 1 : 0.25);
+  }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'other';
+}

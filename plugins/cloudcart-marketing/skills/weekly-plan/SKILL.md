@@ -36,7 +36,7 @@ Call `plan_save` with `items` and a one-sentence `note` about the week, then `pl
 
 In three or four lines: the idea of the week and anything notable in the numbers (a product selling unusually well, something new that has never been posted). Then say they can press the button on a line, or tell you which one to make, or ask you to swap something. If the card did not appear, list the plan as a short numbered list.
 
-When they pick a line with a product, continue with the `facebook-post` skill for that product link. For a line without a single product (several products, education, an occasion), say plainly that you can write the caption and describe the image idea now, and that the full image flow in the page's style currently covers single-product posts.
+When they pick a line, continue with the `facebook-post` skill, using the kind of post from that line (`sale` is a `product` post that leads with the offer).
 
 ## Changes
 

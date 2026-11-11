@@ -1,9 +1,9 @@
 ---
 name: facebook-post
-description: "Make a ready Facebook post for a product from the CloudCart store: a caption plus a generated image, in a few variants, in the page's own voice and look. Use when the user sends a product link, or asks for a post, ad, creative, image or caption for a product, or asks to change one that was made. Also: направи пост, пост за Facebook, пост за продукт, реклама за продукт, картинка за пост, текст за пост, смени заглавието, направи картинката по-светла, още идеи."
+description: "Make a ready Facebook post for the shop: a caption plus a generated image, in a few variants, in the page's own voice and look. Covers a single product, several products, a kit, an educational post and a holiday or seasonal post. Use when the user sends a product link, or asks for a post, ad, creative, image or caption, or asks to change one that was made. Also: направи пост, пост за Facebook, пост за продукт, пост за комплект, пост за няколко продукта, образователен пост, полезен съвет, празничен пост, поздрав за празник, реклама за продукт, картинка за пост, текст за пост, смени заглавието, направи картинката по-светла, още идеи."
 ---
 
-Turn one product into ready Facebook posts: a caption and an image, as a main variant plus alternative ideas.
+Make ready Facebook posts: a caption and an image, as a main variant plus alternative ideas. Most posts are about one product; the section "Other kinds of post" covers kits, several products, educational and seasonal posts.
 
 **The user** runs the shop and is not a developer. Answer in the language they write in (usually Bulgarian), briefly, without technical words. Do not mention tools, files formats, prompts or templates unless they ask.
 
@@ -34,6 +34,21 @@ Turn one product into ready Facebook posts: a caption and an image, as a main va
 If there is no post library (`library: null`), ask the user once whether they have a Google Drive link to their post library. If they give one, call `post_library_set` with it (it takes up to a minute) and then `post_start` again. If they do not, carry on without it: write in a clear, friendly shop voice, describe the look fully in the image prompt, and still use the product photo as a reference image.
 
 If the user asks to update or refresh the post library, call `post_library_set` without a link.
+
+## Other kinds of post
+
+Choose the kind from what the user asked for and pass it to `post_start` as `kind`. Everything else (ideas, writing, review, images, card) is the same as for one product, with these differences:
+
+| Kind | Pass to `post_start` | What changes |
+|---|---|---|
+| `multi_product` | `product_urls`: 2–4 product links | One image showing all the products together, each recognisable from its own photo. The caption says what they have in common or how they work together, then lists each with one line and its link. At least one product link is required. |
+| `kit` | `product_urls`: the kit's own product link (or the links of the products in it) | Sell the set as one answer to one need: what is inside, in what order to use it, why together. If the kit has its own product page, that is the link to use. |
+| `education` | `topic`; optionally `product_url` for the product that is the answer | Teach one thing clearly: a tip, a how-to, a mistake to avoid, a myth. The useful content comes first and must stand on its own; the product, if any, appears once at the end as the natural next step. Claims about the product still come only from its description; general advice must be standard, uncontroversial practice for this shop's field. |
+| `seasonal` | `topic` and `occasion` (`christmas`, `new_year`, `easter`, `womens_day`, `valentines`, `mothers_day`, `summer`, `back_to_school`, `black_friday`, `other`); optionally `product_url` | A greeting or a seasonal moment in the page's warm voice. Short caption. No product claims unless a product was given. |
+
+For these kinds `post_start` returns `products` and `product_photos` (several, possibly none) instead of `product` and `product_photo`, and examples of the same kind from the page. In the image prompt, number the product photos first ("Images 1–3 are the product photos, in this order: …") and the style references after them. When there is no product photo, the style references are the only reference images: still load them.
+
+The template returned for the baseline is what the page has used for this kind. If it is an old look (for example `canva_collage_legacy`), keep its idea but use the page's current typography and finish, as the recent examples show.
 
 ## Step 2 — Propose ideas
 

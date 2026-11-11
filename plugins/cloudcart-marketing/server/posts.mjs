@@ -8,6 +8,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { loadConfig, getFromStore } from './lib.mjs';
 import { refreshIfStale } from './library-sync.mjs';
+import { rankForKind, pickTemplateForKind } from './library.mjs';
 import { loadLibrary, rank, selectExamples, pickTemplate, selectStyleRefs, performanceInsights, exampleForWriter } from './library.mjs';
 
 export const POSTS_ROOT = process.env.CLOUDCART_POSTS_DIR || join(homedir(), 'Documents', 'CloudCart Marketing', 'posts');
@@ -83,43 +84,38 @@ function copyStyleRefs(refs, variantDir) {
   });
 }
 
-/** post_start: read the product, create the working folder, fetch the photo, pick examples and style references. */
-export async function postStart(args) {
-  const cfg = loadConfig();
-  if (!cfg.store || !cfg.apiKey) throw err('The store is not connected yet. Call cloudcart_connect first.');
-  const productTypes = Array.isArray(args?.product_types) ? args.product_types.filter((t) => typeof t === 'string') : [];
+const KINDS = ['product', 'multi_product', 'kit', 'education', 'seasonal'];
 
-  // Find the product by link (its last path segment is the URL handle) or by ID.
+/** Read one product by its page link or ID. Returns { product, imageUrls }. */
+async function loadProduct(cfg, ref, shopUrl) {
   let doc;
   let handle = null;
   let productUrl = null;
-  if (typeof args?.product_url === 'string' && args.product_url.trim()) {
+  if (ref.url) {
     let u;
     try {
-      u = new URL(args.product_url.trim());
+      u = new URL(String(ref.url).trim());
     } catch {
-      throw err('"product_url" is not a valid link.');
+      throw err(`"${ref.url}" is not a valid link.`);
     }
     handle = decodeURIComponent(u.pathname.replace(/\/$/, '').split('/').pop() || '');
-    if (!/^[\p{L}\p{N}_-]+$/u.test(handle)) throw err('That link does not look like a product page.');
+    if (!/^[\p{L}\p{N}_-]+$/u.test(handle)) throw err(`"${ref.url}" does not look like a product page.`);
     productUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}`;
     doc = await apiGet(cfg, 'products', `?${new URLSearchParams({ 'filter[url_handle]': handle, include: 'images' })}`);
-  } else if (args?.product_id !== undefined && /^[A-Za-z0-9_-]+$/.test(String(args.product_id))) {
-    doc = await apiGet(cfg, `products/${args.product_id}`, '?include=images');
+  } else if (ref.id !== undefined && /^[A-Za-z0-9_-]+$/.test(String(ref.id))) {
+    doc = await apiGet(cfg, `products/${ref.id}`, '?include=images');
   } else {
-    throw err('Give "product_url" (the product page link) or "product_id".');
+    throw err('Give the product page link or a product ID.');
   }
   const data = Array.isArray(doc?.data) ? doc.data[0] : doc?.data;
-  if (!data) throw err('No product with that link or ID was found in the store. Check the link.');
+  if (!data) throw err(`No product was found in the store for ${ref.url || ref.id}. Check the link.`);
   const a = data.attributes || {};
   handle = a.url_handle || handle || String(data.id);
-
-  const library = loadLibrary();
-  if (!productUrl && library?.meta?.shop_url) productUrl = `${library.meta.shop_url.replace(/\/$/, '')}/product/${handle}`;
+  if (!productUrl && shopUrl) productUrl = `${shopUrl.replace(/\/$/, '')}/product/${handle}`;
 
   // Brand and category are separate records; a failure here is not fatal.
   const related = async (rel, resource) => {
-    const id = data.relationships?.[rel]?.data?.id;
+    const id = data.relationships?.[rel]?.data?.id ?? a[`${rel}_id`];
     if (!id) return null;
     try {
       return (await apiGet(cfg, `${resource}/${id}`))?.data?.attributes?.name || null;
@@ -128,44 +124,96 @@ export async function postStart(args) {
     }
   };
   const [brand, category] = await Promise.all([related('vendor', 'vendors'), related('category', 'categories')]);
-
-  const product = {
-    id: String(data.id),
-    url: productUrl,
-    name: a.name || '',
-    brand,
-    category,
-    price_from: typeof a.price_from === 'number' ? a.price_from / 100 : null,
-    price_to: typeof a.price_to === 'number' ? a.price_to / 100 : null,
-    active: a.active ?? null,
-    description: htmlToText(a.description),
+  const imageUrls = (doc.included || [])
+    .filter((r) => r.type === 'images' && r.attributes?.src)
+    .sort((x, y) => (x.attributes.sort_order ?? 0) - (y.attributes.sort_order ?? 0))
+    .slice(0, 3)
+    .map((r) => r.attributes.src);
+  return {
+    handle,
+    imageUrls,
+    product: {
+      id: String(data.id),
+      url: productUrl,
+      name: a.name || '',
+      brand,
+      category,
+      price_from: typeof a.price_from === 'number' ? a.price_from / 100 : null,
+      price_to: typeof a.price_to === 'number' ? a.price_to / 100 : null,
+      active: a.active ?? null,
+      description: htmlToText(a.description),
+    },
   };
+}
+
+/**
+ * post_start: read the product(s), create the working folder, fetch the photos, pick examples and style references.
+ * kind: product (default) | multi_product | kit | education | seasonal.
+ */
+export async function postStart(args) {
+  const cfg = loadConfig();
+  if (!cfg.store || !cfg.apiKey) throw err('The store is not connected yet. Call cloudcart_connect first.');
+  const kind = KINDS.includes(args?.kind) ? args.kind : 'product';
+  const productTypes = Array.isArray(args?.product_types) ? args.product_types.filter((t) => typeof t === 'string') : [];
+  const topic = typeof args?.topic === 'string' ? args.topic.trim().slice(0, 300) : '';
+  const occasion = typeof args?.occasion === 'string' ? args.occasion.trim().slice(0, 40) : '';
+  const library = loadLibrary();
+  const shopUrl = library?.meta?.shop_url || `https://${cfg.store}`;
+
+  // Which products this post is about.
+  const refs = [];
+  if (Array.isArray(args?.product_urls)) for (const u of args.product_urls) if (typeof u === 'string' && u.trim()) refs.push({ url: u });
+  if (typeof args?.product_url === 'string' && args.product_url.trim()) refs.unshift({ url: args.product_url });
+  if (!refs.length && args?.product_id !== undefined) refs.push({ id: args.product_id });
+  const seen = new Set();
+  const unique = refs.filter((r) => !seen.has(r.url || `#${r.id}`) && seen.add(r.url || `#${r.id}`));
+  if (kind === 'product' && unique.length !== 1) throw err('Give "product_url" (the product page link) or "product_id".');
+  if (kind === 'multi_product' && (unique.length < 2 || unique.length > 4)) throw err('A post about several products needs 2 to 4 links in "product_urls".');
+  if (kind === 'kit' && (unique.length < 1 || unique.length > 4)) throw err('A kit post needs the kit\'s product link (or up to 4 product links) in "product_urls".');
+  if ((kind === 'education' || kind === 'seasonal') && !topic && !occasion) throw err('Give a "topic" (what the post is about) or an "occasion".');
+  if ((kind === 'education' || kind === 'seasonal') && unique.length > 1) throw err('An educational or seasonal post takes at most one product.');
+
+  const loaded = await Promise.all(unique.map((r) => loadProduct(cfg, r, shopUrl)));
+  const products = loaded.map((l) => l.product);
 
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-  const folder = join(POSTS_ROOT, `${stamp}-${handle.slice(0, 60)}`);
+  const slug = (loaded[0]?.handle || (topic || occasion).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') || kind).slice(0, 60);
+  const folder = join(POSTS_ROOT, `${stamp}-${slug}`);
   mkdirSync(join(folder, 'baseline'), { recursive: true });
 
-  const images = (doc.included || [])
-    .filter((r) => r.type === 'images' && r.attributes?.src)
-    .sort((x, y) => (x.attributes.sort_order ?? 0) - (y.attributes.sort_order ?? 0));
-  let photo = null;
-  for (const img of images.slice(0, 3)) {
-    try {
-      photo = await downloadImage(img.attributes.src, join(folder, 'product'));
-    } catch {
-      photo = null;
+  // Product photos: product.jpg for one product, product_1.jpg … for several.
+  const photos = [];
+  for (let i = 0; i < loaded.length; i++) {
+    let photo = null;
+    for (const src of loaded[i].imageUrls) {
+      try {
+        photo = await downloadImage(src, join(folder, loaded.length === 1 ? 'product' : `product_${i + 1}`));
+      } catch {
+        photo = null;
+      }
+      if (photo) break;
     }
-    if (photo) break;
+    if (photo) photos.push(photo);
   }
 
-  writeFileSync(join(folder, 'product.json'), JSON.stringify({ ...product, photo: photo && basename(photo), product_types: productTypes }, null, 2));
+  // product.json keeps the single-product fields at the top level so older folders and newer ones read the same.
+  writeFileSync(
+    join(folder, 'product.json'),
+    JSON.stringify({ ...(products[0] || { name: topic || occasion, url: null }), photo: photos[0] ? basename(photos[0]) : null, product_types: productTypes, kind, topic, occasion, products, photos: photos.map((f) => basename(f)) }, null, 2),
+  );
 
-  const result = {
-    folder,
-    product,
-    product_photo: photo,
-    product_photo_note: photo ? undefined : 'No product photo could be downloaded. Ask the user to attach one before generating images.',
-  };
+  const result = { folder, kind };
+  if (kind === 'product') {
+    result.product = products[0];
+    result.product_photo = photos[0] || null;
+  } else {
+    if (topic) result.topic = topic;
+    if (occasion) result.occasion = occasion;
+    result.products = products;
+    result.product_photos = photos;
+  }
+  if (products.length && photos.length < products.length)
+    result.product_photo_note = 'Not every product photo could be downloaded. Ask the user to attach the missing ones before generating images.';
 
   if (!library) {
     result.library = null;
@@ -176,16 +224,19 @@ export async function postStart(args) {
   }
 
   refreshIfStale(); // newer library on Drive? fetch it in the background for next time
-  const ranked = rank(library, product, productTypes);
-  const template = library.meta.templates?.[args?.template] !== undefined ? args.template : pickTemplate(library);
-  const refs = selectStyleRefs(library, ranked, template, product, 2);
+  const subject = { kind, topic, occasion, products };
+  const ranked = kind === 'product' ? rank(library, products[0], productTypes) : rankForKind(library, subject);
+  const forced = library.meta.templates?.[args?.template] !== undefined ? args.template : null;
+  const template = forced || (kind === 'product' ? pickTemplate(library) : pickTemplateForKind(library, ranked));
+  const refs2 = selectStyleRefs(library, ranked, template, products[0] || { url: null }, 2);
   result.page = { name: library.meta.page, about: library.meta.about, shop_url: library.meta.shop_url };
-  result.baseline = { template, folder: join(folder, 'baseline'), style_refs: copyStyleRefs(refs, join(folder, 'baseline')) };
+  result.baseline = { template, folder: join(folder, 'baseline'), style_refs: copyStyleRefs(refs2, join(folder, 'baseline')) };
   result.examples = selectExamples(ranked, 4).map(exampleForWriter);
-  result.performance = performanceInsights(ranked, productTypes);
+  result.performance = performanceInsights(ranked, kind === 'product' ? productTypes : [kind]);
   result.templates = library.meta.templates;
-  if (!productTypes.length)
+  if (kind === 'product' && !productTypes.length)
     result.note = `No product_types were given, so examples are ranked without them. Allowed values: ${library.meta.product_types.join(', ')}.`;
+  if (kind !== 'product' && !result.examples.length) result.note = `The page has no past ${kind} posts in the library, so there are no examples for this kind.`;
   return result;
 }
 
@@ -204,17 +255,20 @@ export function postSave(args) {
   mkdirSync(dir, { recursive: true });
 
   // Reference images, in the order the prompt refers to them: product photo first, then style references.
+  const kind = product.kind || 'product';
   const attachments = [];
-  if (product.photo && existsSync(join(folder, product.photo))) {
-    const dest = join(dir, product.photo);
-    copyFileSync(join(folder, product.photo), dest);
+  for (const name of product.photos?.length ? product.photos : product.photo ? [product.photo] : []) {
+    if (!existsSync(join(folder, name))) continue;
+    const dest = join(dir, name);
+    copyFileSync(join(folder, name), dest);
     attachments.push(dest);
   }
+  const photoCount = attachments.length;
   let refs = readdirSync(dir).filter((f) => f.startsWith('style_ref_')).sort().map((f) => join(dir, f));
   const library = loadLibrary();
   const template = typeof args.template === 'string' ? args.template : null;
   if (!refs.length && library && template) {
-    const ranked = rank(library, product, product.product_types || []);
+    const ranked = kind === 'product' ? rank(library, product, product.product_types || []) : rankForKind(library, product);
     refs = copyStyleRefs(selectStyleRefs(library, ranked, template, product, 2), dir);
   }
   attachments.push(...refs);
@@ -225,10 +279,12 @@ export function postSave(args) {
   for (const b of imageText)
     if (!prompt.includes(normalizeQuoted(b.text)))
       issues.push({ severity: 'major', area: 'prompt', problem: `The in-image text "${b.text}" is not quoted word for word in the image prompt.`, fix: 'Quote it exactly, in double quotes, in the prompt.' });
-  if (product.url && !args.caption.includes(product.url))
-    issues.push({ severity: 'major', area: 'caption_formula', problem: 'The product link is missing from the caption.', fix: `Add ${product.url} on its own line.` });
+  // One product: its link must be there. Several: at least one of them. No product: no link is required.
+  const links = (product.products?.length ? product.products : [product]).map((pr) => pr.url).filter(Boolean);
+  if (links.length && !links.some((l) => args.caption.includes(l)))
+    issues.push({ severity: 'major', area: 'caption_formula', problem: links.length === 1 ? 'The product link is missing from the caption.' : 'None of the product links is in the caption.', fix: `Add ${links[0]} on its own line.` });
   if (!attachments.length)
-    issues.push({ severity: 'major', area: 'prompt', problem: 'There are no reference images for this variant.', fix: 'Ask the user to attach a product photo.' });
+    issues.push({ severity: 'major', area: 'prompt', problem: 'There are no reference images for this variant.', fix: links.length ? 'Ask the user to attach a product photo.' : 'Ask the user to attach an example image in the style they want, or describe the look fully in the prompt.' });
 
   const brief = {
     variant, template, aspect_ratio: args.aspect_ratio === '4:5' ? '4:5' : '1:1',
@@ -254,7 +310,12 @@ export function postSave(args) {
   return {
     variant_folder: dir,
     reference_images: attachments,
-    reference_images_note: 'Load every one of these files into the conversation (view them) before generating the image, in this order: Image 1 is the product photo, Image 2+ are style references.',
+    reference_images_note:
+      photoCount > 1
+        ? `Load every one of these files into the conversation (view them) before generating the image, in this order: Images 1-${photoCount} are the product photos, the rest are style references.`
+        : photoCount === 1
+          ? 'Load every one of these files into the conversation (view them) before generating the image, in this order: Image 1 is the product photo, Image 2+ are style references.'
+          : 'Load every one of these files into the conversation (view them) before generating the image: they are style references from the page. There is no product photo for this post.',
     issues,
   };
 }

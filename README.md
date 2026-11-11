@@ -2,7 +2,7 @@
 
 A ChatGPT / Codex plugin that gives a CloudCart store owner a marketing assistant working from real store data:
 
-- **Facebook posts**: paste a product link and get a caption plus a generated image, as a main variant and alternative ideas, in the page's own voice and look, shown as a preview card.
+- **Facebook posts**: paste a product link and get a caption plus a generated image, as a main variant and alternative ideas, in the page's own voice and look, shown as a preview card. Also posts for several products, kits, educational tips and holidays.
 - **Weekly plan**: "what should I post this week?" returns a plan of posts chosen from what is selling, new, on sale and not posted about lately, shown as a card with a button to make each post.
 - **Store questions**: best sellers, slow movers, campaign ideas, product copy and email drafts.
 
