@@ -88,7 +88,9 @@ Also tell them: the plugin can only read from the store. It cannot change produc
 
 ## Updating later
 
-Run Step 3's `upgrade` command, then Step 4's `remove` and `add`, then restart ChatGPT. The store connection is kept.
+The easy way: on the plugin's page in ChatGPT press **Update the plugin**, or write "update the plugin" in a Work-mode chat, then restart ChatGPT.
+
+By hand: run Step 3's `upgrade` command, then Step 4's `add` command, then restart ChatGPT. The store connection, settings and post library are kept.
 
 ## Removing
 

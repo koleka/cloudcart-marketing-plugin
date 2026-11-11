@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Set up or check the CloudCart Marketing plugin: connect the store, add the post library link, confirm everything works. Use right after the plugin is installed, when the user asks to set up, configure or connect the plugin, or asks where its settings are. Also: настрой плъгина, свържи магазина, настройки, къде са настройките."
+description: "Set up, check or update the CloudCart Marketing plugin: connect the store, add the post library link, confirm everything works, install a new version. Use right after the plugin is installed, when the user asks to set up, configure, connect, update or upgrade the plugin, or asks where its settings are. Also: настрой плъгина, свържи магазина, настройки, къде са настройките, обнови плъгина, нова версия."
 ---
 
 Get the plugin ready to use. The user runs a shop and is not a developer: answer in the language they write in, in plain words, a few lines at a time.
@@ -19,6 +19,10 @@ All three are saved only on this computer. The plugin can only read from the sto
 3. **If the store is connected but there is no post library:** ask once whether they have a Google Drive link to their post library. If they give it, call `post_library_set` with it (up to a minute). If not, say that posts will still work, in a generic style, and that the link can be added later.
 4. Call `cloudcart_status` again and confirm in one or two lines what is ready.
 5. Finish with what they can do now: paste a product link and ask for a Facebook post, or ask about best sellers.
+
+## Updating the plugin
+
+If the user asks to update or upgrade the plugin, call `plugin_update`. Tell them the result in one line, and if it installed a new version, that they need to quit ChatGPT completely and open it again. Their settings and post library are kept.
 
 ## Where the settings live
 

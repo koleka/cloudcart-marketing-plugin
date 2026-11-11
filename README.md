@@ -67,6 +67,7 @@ plugins/cloudcart-marketing/
   server/library.mjs                       ranking of past posts and style references
   server/library-sync.mjs                  download and install the library from Google Drive
   server/library-cli.mjs                   the same from the command line (used during installation)
+  server/update.mjs                        the "Update the plugin" action
   server/post-card.html                    the preview card (MCP Apps UI)
   server/connect.mjs                       the browser page for connecting the store
   server/lib.mjs                           config, validation, the single GET call
@@ -82,4 +83,6 @@ No dependencies. Needs Node.js 18 or newer.
 
 ## Changing the plugin
 
-Edit the files, raise `version` in `plugin.json`, commit and push. Then on each computer follow "Updating later" in INSTALL.md.
+Edit the files, raise `version` in `plugin.json`, commit and push.
+
+To get the new version on a computer: open the plugin's page in ChatGPT and press **Update the plugin** under settings, or write "update the plugin" in a Work-mode chat, then quit and reopen ChatGPT. Settings, the store connection and the post library are kept. The manual commands are under "Updating later" in INSTALL.md.

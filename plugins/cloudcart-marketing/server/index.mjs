@@ -7,13 +7,14 @@ import { RESOURCES, loadConfig, saveConfig, normalizeStore, parsePath, buildSear
 import { openConnectPage } from './connect.mjs';
 import { readFileSync } from 'node:fs';
 import { postStart, postSave, postAddImage, postShow } from './posts.mjs';
+import { updatePlugin } from './update.mjs';
 import { installFromLink, libraryStatus, isRefreshing, getLibraryLink, setLibraryLink } from './library-sync.mjs';
 
 const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.7.0' };
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.8.0' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
@@ -156,6 +157,15 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
   {
+    name: 'plugin_update',
+    title: 'Update the plugin',
+    description:
+      'Install the newest published version of this plugin on this computer. Use only when the user asks to update or upgrade the plugin. ' +
+      'Takes up to a minute. Afterwards tell the user to quit ChatGPT completely and open it again. Settings, the store connection and the post library are kept.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
     name: 'post_show',
     title: 'Show the post as a card',
     description:
@@ -213,6 +223,7 @@ function settingsRead() {
     layout: [
       { kind: 'group', title: 'Store', items: [{ kind: 'property', property: 'store' }, { kind: 'property', property: 'apiKey' }, { kind: 'tool', tool: 'cloudcart_status', description: 'Check that the store and the post library are working.' }] },
       { kind: 'group', title: 'Facebook posts', items: [{ kind: 'property', property: 'libraryUrl' }, { kind: 'tool', tool: 'post_library_set', description: 'Download the newest version of the post library now.' }] },
+      { kind: 'group', title: 'Plugin', items: [{ kind: 'tool', tool: 'plugin_update', description: 'Install the newest version of this plugin. Restart ChatGPT afterwards.' }] },
     ],
   };
 }
@@ -381,6 +392,13 @@ async function handle(msg) {
       if (name === 'cloudcart_status') return status();
       if (name === 'cloudcart_get') return get(msg.params?.arguments);
       if (name === 'cloudcart_connect') return connect();
+      if (name === 'plugin_update') {
+        try {
+          return ok(await updatePlugin());
+        } catch (e) {
+          return fail(e.expected ? e.message : `The update failed: ${e.message}`);
+        }
+      }
       if (name === 'settings_read') return { content: [], structuredContent: settingsRead() };
       if (name === 'settings_update') {
         try {
