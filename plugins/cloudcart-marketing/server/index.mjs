@@ -8,13 +8,17 @@ import { openConnectPage } from './connect.mjs';
 import { readFileSync } from 'node:fs';
 import { postStart, postSave, postAddImage, postShow } from './posts.mjs';
 import { updatePlugin } from './update.mjs';
+import { planStart, planSave, planShow } from './plan.mjs';
+
+const PLAN_URI = 'ui://cloudcart-marketing/plan-card-v1.html';
+const PLAN_RESOURCE = { uri: PLAN_URI, name: 'Post plan card', description: 'The week\'s planned posts with a button to make each one.', mimeType: 'text/html;profile=mcp-app' };
 import { installFromLink, libraryStatus, isRefreshing, getLibraryLink, setLibraryLink } from './library-sync.mjs';
 
 const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.8.0' };
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.9.0' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
@@ -45,7 +49,7 @@ const TOOLS = [
     title: 'Read data from the CloudCart store',
     description:
       'Read from the connected CloudCart store through its REST JSON:API (GET /api/v2/...). Read-only: it cannot create, change or delete anything. ' +
-      'Returns the JSON:API response: "data" (array for lists, object for one record), "included", "meta.total_count" and "links.next". ' +
+      'Returns the JSON:API response: "data" (array for lists, object for one record), "included", "meta.page" (total, last-page) and "links.next". ' +
       'Lists return 20 records per page by default (max 100); use params "page[size]" and "page[number]". ' +
       'Other params: "filter[column]" (exact match on any attribute), "sort" (prefix "-" for descending), "include" (related records), ' +
       '"append[type]" (computed attributes), "fields[type]" (only these attributes; use it to keep responses small). ' +
@@ -155,6 +159,53 @@ const TOOLS = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: 'plan_start',
+    title: 'Gather this week\'s post candidates',
+    description:
+      'First step of planning what to post this week. Reads the store (best sellers of the last 30 days from orders, new products, products on sale, stock) and the post library ' +
+      '(when each product was last posted, the recent mix of post types, best days and hours) and returns candidate products with the reasons each is worth a post. Does not change anything.',
+    inputSchema: { type: 'object', properties: { posts: { type: 'integer', description: 'How many posts to plan. Default 5.' } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: 'plan_save',
+    title: 'Save the post plan',
+    description: 'Save the plan you composed from plan_start as a file on this computer. Call plan_show afterwards to display it.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: 'One sentence about the week, in the user\'s language.' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              day: { type: 'string', description: 'YYYY-MM-DD' },
+              time: { type: 'string', description: 'HH:MM, optional' },
+              kind: { type: 'string', enum: ['product', 'sale', 'multi_product', 'kit', 'education', 'seasonal'] },
+              title: { type: 'string' },
+              product_name: { type: 'string' },
+              product_url: { type: 'string' },
+              reason: { type: 'string' },
+            },
+            required: ['day', 'title'],
+          },
+        },
+      },
+      required: ['items'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'plan_show',
+    title: 'Show the post plan',
+    description: 'Show a saved post plan (the latest by default) to the user as a card with a "make this post" button on each line.',
+    inputSchema: { type: 'object', properties: { plan: { type: 'string', description: 'Plan file path from plan_save. Omit for the latest.' } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    _meta: { ui: { resourceUri: PLAN_URI }, 'openai/outputTemplate': PLAN_URI, 'openai/toolInvocation/invoking': 'Preparing the plan…', 'openai/toolInvocation/invoked': 'Plan ready.' },
   },
   {
     name: 'plugin_update',
@@ -302,7 +353,7 @@ async function status() {
     const problem = describeHttpProblem(r.status);
     if (problem) return fail(`Store: ${cfg.store}. ${problem}`);
     if (r.status >= 400 || !r.json) return fail(`Store: ${cfg.store}. Unexpected response (HTTP ${r.status}).`);
-    const count = r.json?.meta?.total_count;
+    const count = r.json?.meta?.page?.total ?? r.json?.meta?.total_count;
     return ok(
       `Connected to ${cfg.store}${count !== undefined ? ` (${count} products)` : ''}. Read-only: this plugin cannot change anything in the store. ${libraryStatus()}`,
     );
@@ -371,17 +422,18 @@ async function handle(msg) {
     case 'tools/list':
       return { tools: [...TOOLS, ...SETTINGS_TOOLS] };
     case 'resources/list':
-      return { resources: [CARD_RESOURCE] };
+      return { resources: [CARD_RESOURCE, PLAN_RESOURCE] };
     case 'resources/templates/list':
       return { resourceTemplates: [] };
     case 'resources/read': {
-      if (msg.params?.uri !== CARD_URI) throw Object.assign(new Error(`Unknown resource: ${msg.params?.uri}`), { code: -32002 });
+      const file = { [CARD_URI]: './post-card.html', [PLAN_URI]: './plan-card.html' }[msg.params?.uri];
+      if (!file) throw Object.assign(new Error(`Unknown resource: ${msg.params?.uri}`), { code: -32002 });
       return {
         contents: [
           {
-            uri: CARD_URI,
+            uri: msg.params.uri,
             mimeType: CARD_MIME,
-            text: readFileSync(new URL('./post-card.html', import.meta.url), 'utf8'),
+            text: readFileSync(new URL(file, import.meta.url), 'utf8'),
             _meta: { ui: { prefersBorder: false, permissions: { clipboardWrite: {} } } },
           },
         ],
@@ -392,6 +444,21 @@ async function handle(msg) {
       if (name === 'cloudcart_status') return status();
       if (name === 'cloudcart_get') return get(msg.params?.arguments);
       if (name === 'cloudcart_connect') return connect();
+      if (name === 'plan_start' || name === 'plan_save') {
+        try {
+          return ok(JSON.stringify(await (name === 'plan_start' ? planStart : planSave)(msg.params?.arguments || {})));
+        } catch (e) {
+          return fail(e.expected ? e.message : `Something went wrong: ${e.message}`);
+        }
+      }
+      if (name === 'plan_show') {
+        try {
+          const r = planShow(msg.params?.arguments || {});
+          return { content: [{ type: 'text', text: r.summary }], structuredContent: r.structuredContent };
+        } catch (e) {
+          return fail(e.expected ? e.message : `Something went wrong: ${e.message}`);
+        }
+      }
       if (name === 'plugin_update') {
         try {
           return ok(await updatePlugin());

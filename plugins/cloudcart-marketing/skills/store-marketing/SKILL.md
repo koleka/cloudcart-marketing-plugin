@@ -44,7 +44,7 @@ Common starting points:
 Rules for reading:
 
 - **Best sellers are computed, not fetched.** There is no best-seller endpoint: fetch the orders for the period with `include: "products"`, then add up quantities and revenue per product from the line items yourself.
-- **Paginate.** Lists return 20 records by default and at most 100. Keep requesting `page[number]` + 1 while the response has `links.next`. Check `meta.total_count` first, and if a full read would take more than about 20 requests, narrow the period or tell the user you are working from a sample.
+- **Paginate.** Lists return 20 records by default and at most 100. Keep requesting `page[number]` + 1 while the response has `links.next`. Check `meta.page.total` first, and if a full read would take more than about 20 requests, narrow the period or tell the user you are working from a sample.
 - **Keep responses small.** Use `fields[type]` to request only the attributes you need, and only the includes you need.
 - **Money is in cents.** `2999` means 29.99. Convert before showing it, and use the order's `currency`.
 - **Booleans are `"yes"` / `"no"`.**

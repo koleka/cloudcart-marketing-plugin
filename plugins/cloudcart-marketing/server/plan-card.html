@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post plan</title>
+<style>
+  :root {
+    --bg: var(--color-background-primary, #ffffff);
+    --soft: var(--color-background-secondary, #f3f3f1);
+    --text: var(--color-text-primary, #1c1c1a);
+    --muted: var(--color-text-secondary, #66665f);
+    --line: var(--color-border-primary, #dcdcd6);
+    --accent: #e03a40;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: var(--color-background-primary, #1f1f1d); --soft: var(--color-background-secondary, #2a2a27);
+      --text: var(--color-text-primary, #f1f1ec); --muted: var(--color-text-secondary, #a3a39a);
+      --line: var(--color-border-primary, #3d3d38); --accent: #ff6a6f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: var(--color-background-primary, #1f1f1d); --soft: var(--color-background-secondary, #2a2a27);
+    --text: var(--color-text-primary, #f1f1ec); --muted: var(--color-text-secondary, #a3a39a);
+    --line: var(--color-border-primary, #3d3d38); --accent: #ff6a6f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; }
+  body { color: var(--text); font: 15px/1.45 var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif); padding: 4px; }
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; max-width: 620px; margin: 0 auto; }
+  .head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+  .head h2 { margin: 0; font-size: 17px; }
+  .head p { margin: 4px 0 0; color: var(--muted); font-size: 13.5px; }
+  .row { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .date { text-align: center; }
+  .dow { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .dom { font-size: 22px; font-weight: 700; line-height: 1.1; }
+  .time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .kind { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); margin-bottom: 4px; }
+  .title { font-weight: 600; overflow-wrap: anywhere; }
+  .product { font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+  .reason { font-size: 13.5px; margin-top: 4px; overflow-wrap: anywhere; }
+  .btn { margin-top: 8px; font: inherit; font-size: 13.5px; font-weight: 600; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; }
+  .btn[disabled] { opacity: .6; cursor: default; }
+  .hintline { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="root"><div class="card"><div class="empty">…</div></div></div>
+<script>
+(() => {
+  const T = {
+    en: { heading: 'Post plan', make: 'Make this post', sent: 'Sent to the chat ✓', copyHint: 'Write this in the chat:',
+          kinds: { product: 'Product', sale: 'Sale', multi_product: 'Several products', kit: 'Kit', education: 'Education', seasonal: 'Occasion' },
+          ask: (i) => i.product_url ? 'Make a Facebook post for ' + i.product_url : 'Make a Facebook post: ' + i.title },
+    bg: { heading: 'План за постове', make: 'Направи този пост', sent: 'Изпратено в чата ✓', copyHint: 'Напиши това в чата:',
+          kinds: { product: 'Продукт', sale: 'Промоция', multi_product: 'Няколко продукта', kit: 'Комплект', education: 'Полезно', seasonal: 'Повод' },
+          ask: (i) => i.product_url ? 'Направи пост за ' + i.product_url : 'Направи пост: ' + i.title },
+  };
+  const lang = (navigator.language || 'en').toLowerCase().startsWith('bg') ? 'bg' : 'en';
+  const t = T[lang];
+  const root = document.getElementById('root');
+  let data = null;
+
+  let nextId = 1;
+  const pending = new Map();
+  const post = (msg) => window.parent.postMessage({ jsonrpc: '2.0', ...msg }, '*');
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    post({ id, method, params });
+    setTimeout(() => { if (pending.delete(id)) reject(new Error('timeout')); }, 8000);
+  });
+  const notify = (method, params) => post({ method, params });
+
+  function applyHost(ctx) {
+    if (!ctx) return;
+    if (ctx.theme === 'dark' || ctx.theme === 'light') document.documentElement.dataset.theme = ctx.theme;
+    const vars = ctx.styles && ctx.styles.variables;
+    if (vars) for (const [k, v] of Object.entries(vars)) if (typeof v === 'string') document.documentElement.style.setProperty(k, v);
+  }
+  function accept(result) {
+    const sc = result && (result.structuredContent || result);
+    if (!sc || !Array.isArray(sc.items)) return;
+    data = sc;
+    render();
+  }
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || m.jsonrpc !== '2.0') return;
+    if (m.id !== undefined && pending.has(m.id) && !m.method) {
+      const p = pending.get(m.id); pending.delete(m.id);
+      m.error ? p.reject(new Error(m.error.message || 'error')) : p.resolve(m.result);
+      return;
+    }
+    if (m.method === 'ui/notifications/tool-result') accept(m.params);
+    else if (m.method === 'ui/notifications/host-context-changed') applyHost(m.params);
+    else if ((m.method === 'ui/resource-teardown' || m.method === 'ping') && m.id !== undefined) post({ id: m.id, result: {} });
+  });
+  function fromOpenAI() {
+    const o = window.openai;
+    if (!o) return;
+    if (o.theme) document.documentElement.dataset.theme = o.theme;
+    if (o.toolOutput) accept({ structuredContent: o.toolOutput });
+  }
+  window.addEventListener('openai:set_globals', fromOpenAI);
+
+  const el = (tag, props = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') n.className = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) n.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid);
+    return n;
+  };
+
+  // Ask the chat to make the post. Hosts differ on the message shape, so try the known ones in turn.
+  async function send(text, btn, row) {
+    btn.disabled = true;
+    const block = { type: 'text', text };
+    try {
+      try { await request('ui/message', { role: 'user', content: [block] }); }
+      catch { await request('ui/message', { role: 'user', content: block }); }
+      btn.textContent = t.sent;
+    } catch {
+      if (window.openai && window.openai.sendFollowUpMessage) {
+        try { await window.openai.sendFollowUpMessage({ prompt: text }); btn.textContent = t.sent; return; } catch {}
+      }
+      btn.remove();
+      row.append(el('div', { class: 'hintline' }, t.copyHint + ' ', el('b', {}, text)));
+      reportSize();
+    }
+  }
+
+  function render() {
+    if (!data) return;
+    const dayFmt = new Intl.DateTimeFormat(lang, { weekday: 'short' });
+    root.replaceChildren(el('div', { class: 'card' },
+      el('div', { class: 'head' }, el('h2', {}, t.heading + (data.page && data.page.name ? ' · ' + data.page.name : '')), data.note && el('p', {}, data.note)),
+      data.items.map((i) => {
+        const d = new Date(i.day + 'T12:00:00');
+        const body = el('div', {});
+        const btn = el('button', { class: 'btn', onclick: () => send(t.ask(i), btn, body) }, t.make);
+        body.append(...[
+          el('span', { class: 'kind' }, t.kinds[i.kind] || i.kind),
+          el('div', { class: 'title' }, i.title),
+          i.product_name && el('div', { class: 'product' }, i.product_name),
+          i.reason && el('div', { class: 'reason' }, i.reason),
+          btn,
+        ].filter(Boolean));
+        return el('div', { class: 'row' },
+          el('div', { class: 'date' }, el('div', { class: 'dow' }, dayFmt.format(d)), el('div', { class: 'dom' }, String(d.getDate())), i.time && el('div', { class: 'time' }, i.time)),
+          body);
+      }),
+    ));
+    reportSize();
+  }
+
+  let lastH = 0;
+  function reportSize() {
+    const h = Math.ceil(root.getBoundingClientRect().height) + 8;
+    if (h > 8 && h !== lastH) { lastH = h; notify('ui/notifications/size-changed', { width: Math.ceil(root.getBoundingClientRect().width) + 8, height: h }); }
+  }
+  if (window.ResizeObserver) new ResizeObserver(reportSize).observe(root);
+  window.addEventListener('load', reportSize);
+
+  fromOpenAI();
+  request('ui/initialize', {
+    protocolVersion: '2026-01-26',
+    appInfo: { name: 'CloudCart Marketing plan card', version: '1.0.0' },
+    appCapabilities: { availableDisplayModes: ['inline'] },
+  }).then((res) => { applyHost(res && res.hostContext); notify('ui/notifications/initialized', {}); })
+    .catch(() => {});
+})();
+</script>
+</body>
+</html>

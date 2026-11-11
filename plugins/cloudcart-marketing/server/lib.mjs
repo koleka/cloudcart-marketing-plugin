@@ -64,7 +64,7 @@ export async function checkConnection(storeInput, apiKey) {
     const r = await getFromStore({ store, apiKey: apiKey.trim() }, 'products', '?page%5Bsize%5D=1', 15000);
     if (r.status === 401 || r.status === 403) return { ok: false, reason: 'bad_key' };
     if (r.status >= 400 || !r.json) return { ok: false, reason: 'bad_response' };
-    return { ok: true, store, productCount: r.json?.meta?.total_count };
+    return { ok: true, store, productCount: r.json?.meta?.page?.total ?? r.json?.meta?.total_count };
   } catch {
     return { ok: false, reason: 'unreachable' };
   }

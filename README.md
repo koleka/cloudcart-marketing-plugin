@@ -3,6 +3,7 @@
 A ChatGPT / Codex plugin that gives a CloudCart store owner a marketing assistant working from real store data:
 
 - **Facebook posts**: paste a product link and get a caption plus a generated image, as a main variant and alternative ideas, in the page's own voice and look, shown as a preview card.
+- **Weekly plan**: "what should I post this week?" returns a plan of posts chosen from what is selling, new, on sale and not posted about lately, shown as a card with a button to make each post.
 - **Store questions**: best sellers, slow movers, campaign ideas, product copy and email drafts.
 
 It can only **read** from the store. It sends GET requests to the CloudCart REST API (`/api/v2`) and nothing else.
@@ -64,6 +65,8 @@ plugins/cloudcart-marketing/
   mcp.json                                 declares the local MCP server
   server/index.mjs                         MCP server: store tools and post tools
   server/posts.mjs                         post_start, post_save, post_add_image, post_show (post_library_set is in index.mjs)
+  server/plan.mjs                          plan_start, plan_save, plan_show (weekly post plan)
+  server/plan-card.html                    the plan card
   server/library.mjs                       ranking of past posts and style references
   server/library-sync.mjs                  download and install the library from Google Drive
   server/library-cli.mjs                   the same from the command line (used during installation)
@@ -75,6 +78,7 @@ plugins/cloudcart-marketing/
   skills/store-marketing/SKILL.md          instructions for the assistant
   skills/store-marketing/references/       REST endpoint reference
   skills/facebook-post/SKILL.md            the Facebook post workflow
+  skills/weekly-plan/SKILL.md              how to compose the week
   skills/setup/SKILL.md                    guided setup, run by ChatGPT after installation
 tools/build-post-library.mjs               builds the post library (not installed with the plugin)
 ```

@@ -4,7 +4,7 @@ Condensed from https://cloudcart.dev/docs/rest-api. Paths are what you pass as `
 
 ## Conventions
 
-- `page[size]` (default 20, max 100) and `page[number]`. `meta.total_count` is the total; `links.next` is absent on the last page.
+- `page[size]` (default 20, max 100) and `page[number]`. `meta.page.total` is the total and `meta.page.last-page` the number of pages; `links.next` is absent on the last page.
 - `filter[column]=value` is an exact match and works on any attribute you see in a response. Several filters combine with AND. Resource-specific filters are listed below.
 - `sort=field`, or `sort=-field` for descending. Only the sorts listed per resource are documented.
 - `include=a,b` side-loads related records into the top-level `included` array. Nested: `include=variants.images`.
