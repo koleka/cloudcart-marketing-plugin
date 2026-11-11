@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "cloudcart-marketing",
+  "version": "0.4.1",
+  "description": "Marketing assistant for a CloudCart store: looks at products, orders and customers, and drafts campaigns, promotions and product copy.",
+  "keywords": ["cloudcart", "marketing", "ecommerce"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CloudCart Marketing",
+        "shortDescription": "Marketing help for your CloudCart store",
+        "longDescription": "Connects to your CloudCart store, reads products, orders and customers, and helps with marketing: campaign ideas, promotion plans, product descriptions, email and social media drafts. It can only read from the store and never changes anything in it.",
+        "developerName": "Private",
+        "category": "Productivity",
+        "capabilities": ["Read"],
+        "defaultPrompt": [
+          "Connect my CloudCart store",
+          "What are my best-selling products this month?",
+          "Suggest a promotion for slow-moving products"
+        ],
+        "brandColor": "#ff4b51"
+      }
+    }
+  }
+}

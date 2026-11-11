@@ -1,0 +1,20 @@
+{
+  "name": "cloudcart-marketing",
+  "interface": {
+    "displayName": "CloudCart Marketing"
+  },
+  "plugins": [
+    {
+      "name": "cloudcart-marketing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cloudcart-marketing"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
