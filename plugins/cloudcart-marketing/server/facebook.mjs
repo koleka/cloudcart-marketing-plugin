@@ -100,7 +100,8 @@ export async function schedulePhoto({ file, caption, at }) {
   form.set('source', new Blob([readFileSync(file)], { type }), basename(file));
 
   const created = await graph(`/${fb.pageId}/photos`, { method: 'POST', body: form });
-  const postId = created.post_id || created.id;
+  // For a scheduled photo Facebook returns only the photo id; the post it belongs to is <page id>_<photo id>.
+  const postId = created.post_id || `${fb.pageId}_${created.id}`;
   // Read it back so we report what Facebook actually stored.
   let check = {};
   try {
