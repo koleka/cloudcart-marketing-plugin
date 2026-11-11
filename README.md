@@ -62,7 +62,7 @@ To publish a refreshed library, replace the file in place so the link stays the 
 
 Optional. With a Facebook Page ID and a Page access token saved in the settings, "schedule this for tomorrow at 19:00" opens a confirmation page in the browser with the image, the caption, the Page and the time. Facebook is contacted only when you press the button on that page; the assistant cannot press it. Posts are always scheduled (20 minutes to 29 days ahead), so there is time to change or cancel them in Meta Business Suite.
 
-The token must belong to someone who can create content on the Page and carry the `pages_manage_posts`, `pages_read_engagement` and `pages_show_list` permissions. It is stored in `~/.config/cloudcart-marketing/facebook.json`, readable only by you.
+The token must belong to someone who can create content on the Page and carry the `pages_show_list`, `pages_manage_posts`, `pages_read_engagement`, `pages_read_user_content` and `pages_manage_engagement` permissions. It is stored in `~/.config/cloudcart-marketing/facebook.json`, readable only by you.
 
 ## What is inside
 

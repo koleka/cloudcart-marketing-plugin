@@ -40,14 +40,15 @@ export const facebookReady = () => {
 function explain(error, status) {
   const code = error?.code;
   if (code === 190) return 'Facebook says the access token is invalid or has expired. Create a new Page access token and save it in the plugin settings.';
-  if (code === 200 || code === 10 || code === 283) return 'The Facebook token is not allowed to post on this Page. It needs the pages_manage_posts and pages_read_engagement permissions, from a person who can create content on the Page.';
+  if (code === 200 || code === 10 || code === 283)
+    return `Facebook refused this for the saved token. The token needs pages_manage_posts, pages_read_engagement, pages_read_user_content and pages_manage_engagement, from a person or system user who can create content on the Page. Facebook's own message: ${error.message}`;
   if (code === 324) return 'Facebook did not accept the image file.';
   if (code === 368) return 'Facebook temporarily blocked this action for the Page. Try again later.';
   if (code === 100) return `Facebook rejected the request: ${error.message}`;
   return `Facebook returned an error${status ? ` (HTTP ${status})` : ''}: ${error?.message || 'unknown error'}`;
 }
 
-async function graph(path, { method = 'GET', params, body } = {}) {
+async function graph(path, { method = 'GET', params, body, step } = {}) {
   const url = new URL(`${GRAPH}${path}`);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
   let res;
@@ -62,7 +63,7 @@ async function graph(path, { method = 'GET', params, body } = {}) {
   } catch {
     // not JSON
   }
-  if (!res.ok || json?.error) throw fail(explain(json?.error, res.status));
+  if (!res.ok || json?.error) throw fail(`${step ? `${step}: ` : ''}${explain(json?.error, res.status)}`);
   return json;
 }
 
@@ -99,7 +100,7 @@ export async function schedulePhoto({ file, caption, at }) {
   upload.set('temporary', 'true');
   const type = /\.jpe?g$/i.test(file) ? 'image/jpeg' : /\.webp$/i.test(file) ? 'image/webp' : 'image/png';
   upload.set('source', new Blob([readFileSync(file)], { type }), basename(file));
-  const photo = await graph(`/${fb.pageId}/photos`, { method: 'POST', body: upload });
+  const photo = await graph(`/${fb.pageId}/photos`, { method: 'POST', body: upload, step: 'Uploading the image' });
 
   const post = new FormData();
   post.set('access_token', fb.token);
@@ -108,7 +109,7 @@ export async function schedulePhoto({ file, caption, at }) {
   post.set('published', 'false'); // never publish immediately
   post.set('scheduled_publish_time', String(Math.floor(at.getTime() / 1000)));
   post.set('unpublished_content_type', 'SCHEDULED');
-  const created = { ...(await graph(`/${fb.pageId}/feed`, { method: 'POST', body: post })), photo_id: photo.id };
+  const created = { ...(await graph(`/${fb.pageId}/feed`, { method: 'POST', body: post, step: 'Creating the scheduled post' })), photo_id: photo.id };
   const postId = created.id;
   // Read it back so we report what Facebook actually stored.
   let check = {};

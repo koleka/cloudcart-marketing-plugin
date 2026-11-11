@@ -21,7 +21,7 @@ const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.12.2' };
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.12.3' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
