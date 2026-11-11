@@ -36,6 +36,8 @@ The flow is adapted from the culy-posts project: read the product from the store
 
 Images are made with ChatGPT's built-in image generation, so no OpenAI API key is needed.
 
+**Prices and discounts are checked against the store.** When a product has an active public discount, the post uses the real old price, new price and percentage. A draft with any other price, or a discount claim when there is none, is rejected before the image is made. Customer-group and code-only discounts are not treated as public offers.
+
 ### The post library
 
 Examples and style references come from a "post library": an index of the page's past posts plus a small set of recent post images. It is the shop's own data, lives in `~/.config/cloudcart-marketing/library`, and is **not** in this repository. Without it the plugin still makes posts, in a generic style.
@@ -67,6 +69,7 @@ plugins/cloudcart-marketing/
   server/posts.mjs                         post_start, post_save, post_add_image, post_show (post_library_set is in index.mjs)
   server/plan.mjs                          plan_start, plan_save, plan_show (weekly post plan)
   server/plan-card.html                    the plan card
+  server/offers.mjs                        active discounts and the price checks
   server/library.mjs                       ranking of past posts and style references
   server/library-sync.mjs                  download and install the library from Google Drive
   server/library-cli.mjs                   the same from the command line (used during installation)

@@ -13,7 +13,7 @@ Call `cloudcart_status`; if the store is not connected, call `cloudcart_connect`
 
 It returns:
 
-- `candidates`: products worth posting about, each with `signals`: `best_seller_rank`, `units_sold_30d`, `revenue_30d`, `new_since`, `on_sale`, `last_posted` (date of the last post about it, or null), `posts_about_it`, plus `in_stock`, `price`, `url`.
+- `candidates`: products worth posting about, each with `signals`: `best_seller_rank`, `units_sold_30d`, `revenue_30d`, `new_since`, `on_sale` (a real price cut: old price, new price, percent, end date), `sale_badge_in_store` (only the shop's badge, not a price cut), `last_posted` (date of the last post about it, or null), `posts_about_it`, plus `in_stock`, `price`, `url`.
 - `page`: how many posts of each type went out in the last 30 days, which post types and which weekdays and hours got the best engagement over the last year.
 - `today`, `weekday_today`, `currency`.
 

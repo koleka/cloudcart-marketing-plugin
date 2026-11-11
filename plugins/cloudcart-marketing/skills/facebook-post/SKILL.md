@@ -25,6 +25,7 @@ Make ready Facebook posts: a caption and an image, as a main variant plus altern
 `post_start` returns:
 
 - `product`: name, brand, category, price, description. **This is the only source of product facts.**
+- `product.offer`: the active public discount, or null. See "Prices and discounts" below.
 - `product_photo`: the product photo file. `baseline.style_refs`: style reference image files.
 - `examples`: the page's own posts most relevant to this product, each with why it was picked, its engagement percentile within its year (low = weak), its caption, and an analysis of its images.
 - `performance`: which image templates performed well for this type of product, and the best posts.
@@ -34,6 +35,15 @@ Make ready Facebook posts: a caption and an image, as a main variant plus altern
 If there is no post library (`library: null`), ask the user once whether they have a Google Drive link to their post library. If they give one, call `post_library_set` with it (it takes up to a minute) and then `post_start` again. If they do not, carry on without it: write in a clear, friendly shop voice, describe the look fully in the image prompt, and still use the product photo as a reference image.
 
 If the user asks to update or refresh the post library, call `post_library_set` without a link.
+
+## Prices and discounts
+
+`post_start` reports the store's real numbers, and `post_save` rejects a draft that uses any others.
+
+- **When `product.offer` exists** (old price, new price, percent, optional end date): make the baseline a sale post. Lead with the offer, show the new price large and the old price smaller and crossed out, add "-N%" using exactly `offer.percent`, and state the end date if there is one (no end date: do not invent urgency). Write prices as the store does (`offer.new_price_text`, `offer.old_price_text`). Keep at least one idea on a non-price angle, so there is a post that still works after the offer ends.
+- **When there is no offer:** never write a discount, "sale", "promo", a "-N%" or a crossed-out price. A plain price may be mentioned only if the page's examples do so, and only `product.price_from`.
+- If `offer.variants_differ` is set, sizes have different prices: say "from" before the new price.
+- If `stock_note` says a product is out of stock, tell the user before making the post and let them decide.
 
 ## Other kinds of post
 

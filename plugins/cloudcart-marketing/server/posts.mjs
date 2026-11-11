@@ -8,6 +8,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { loadConfig, getFromStore } from './lib.mjs';
 import { refreshIfStale } from './library-sync.mjs';
+import { offerFromVariants, checkPrices } from './offers.mjs';
 import { rankForKind, pickTemplateForKind } from './library.mjs';
 import { loadLibrary, rank, selectExamples, pickTemplate, selectStyleRefs, performanceInsights, exampleForWriter } from './library.mjs';
 
@@ -101,9 +102,9 @@ async function loadProduct(cfg, ref, shopUrl) {
     handle = decodeURIComponent(u.pathname.replace(/\/$/, '').split('/').pop() || '');
     if (!/^[\p{L}\p{N}_-]+$/u.test(handle)) throw err(`"${ref.url}" does not look like a product page.`);
     productUrl = `${u.origin}${u.pathname.replace(/\/$/, '')}`;
-    doc = await apiGet(cfg, 'products', `?${new URLSearchParams({ 'filter[url_handle]': handle, include: 'images' })}`);
+    doc = await apiGet(cfg, 'products', `?${new URLSearchParams({ 'filter[url_handle]': handle, include: 'images,variants', 'append[variants]': 'discount' })}`);
   } else if (ref.id !== undefined && /^[A-Za-z0-9_-]+$/.test(String(ref.id))) {
-    doc = await apiGet(cfg, `products/${ref.id}`, '?include=images');
+    doc = await apiGet(cfg, `products/${ref.id}`, `?${new URLSearchParams({ include: 'images,variants', 'append[variants]': 'discount' })}`);
   } else {
     throw err('Give the product page link or a product ID.');
   }
@@ -124,6 +125,7 @@ async function loadProduct(cfg, ref, shopUrl) {
     }
   };
   const [brand, category] = await Promise.all([related('vendor', 'vendors'), related('category', 'categories')]);
+  const variants = (doc.included || []).filter((r) => r.type === 'variants');
   const imageUrls = (doc.included || [])
     .filter((r) => r.type === 'images' && r.attributes?.src)
     .sort((x, y) => (x.attributes.sort_order ?? 0) - (y.attributes.sort_order ?? 0))
@@ -141,6 +143,8 @@ async function loadProduct(cfg, ref, shopUrl) {
       price_from: typeof a.price_from === 'number' ? a.price_from / 100 : null,
       price_to: typeof a.price_to === 'number' ? a.price_to / 100 : null,
       active: a.active ?? null,
+      in_stock: variants.reduce((n, v) => n + (Number(v.attributes?.quantity) || 0), 0) > 0 || a.continue_selling === 'yes',
+      offer: offerFromVariants(variants),
       description: htmlToText(a.description),
     },
   };
@@ -212,6 +216,12 @@ export async function postStart(args) {
     result.products = products;
     result.product_photos = photos;
   }
+  const soldOut = products.filter((pr) => pr.in_stock === false).map((pr) => pr.name);
+  if (soldOut.length) result.stock_note = `Out of stock in the store right now: ${soldOut.join('; ')}. Tell the user before making the post; do not mention availability in the post.`;
+  const offers = products.filter((pr) => pr.offer);
+  result.offer_note = offers.length
+    ? 'There is an active public discount (see "offer" on the product). Any price or "-N%" in the post must be exactly these values; post_save checks it.'
+    : 'No active public discount. Do not claim a discount, a sale or an old price; post_save checks it.';
   if (products.length && photos.length < products.length)
     result.product_photo_note = 'Not every product photo could be downloaded. Ask the user to attach the missing ones before generating images.';
 
@@ -283,6 +293,9 @@ export function postSave(args) {
   const links = (product.products?.length ? product.products : [product]).map((pr) => pr.url).filter(Boolean);
   if (links.length && !links.some((l) => args.caption.includes(l)))
     issues.push({ severity: 'major', area: 'caption_formula', problem: links.length === 1 ? 'The product link is missing from the caption.' : 'None of the product links is in the caption.', fix: `Add ${links[0]} on its own line.` });
+  // Prices and discount claims must be the store's own (single products and sets alike).
+  const priced = product.products?.length ? product.products : product.url ? [product] : [];
+  if (priced.length) issues.push(...checkPrices([args.caption, ...imageText.map((b) => b.text)], priced));
   if (!attachments.length)
     issues.push({ severity: 'major', area: 'prompt', problem: 'There are no reference images for this variant.', fix: links.length ? 'Ask the user to attach a product photo.' : 'Ask the user to attach an example image in the style they want, or describe the look fully in the prompt.' });
 

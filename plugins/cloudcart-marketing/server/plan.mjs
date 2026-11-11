@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import { loadConfig, getFromStore, buildSearch } from './lib.mjs';
 import { loadLibrary } from './library.mjs';
+import { offerFromVariants } from './offers.mjs';
 
 export const PLANS_ROOT = process.env.CLOUDCART_PLANS_DIR || join(homedir(), 'Documents', 'CloudCart Marketing', 'plans');
 const DAY = 86_400_000;
@@ -128,10 +129,15 @@ export async function planStart(args) {
   });
 
   // 2) New in the store and 3) on sale, with stock.
-  const listFields = { include: 'variants', 'fields[products]': 'name,url_handle,date_added,price_from,price_percent,sale,active,is_hidden,continue_selling', 'fields[variants]': 'item_id,quantity' };
+  const listFields = { include: 'variants', 'append[variants]': 'discount', 'fields[products]': 'name,url_handle,date_added,price_from,price_percent,sale,active,is_hidden,continue_selling', 'fields[variants]': 'item_id,quantity,discount' };
   const fromList = (doc, mark) => {
     const stock = {};
-    for (const v of doc.included || []) if (v.type === 'variants') stock[v.attributes.item_id] = (stock[v.attributes.item_id] || 0) + (Number(v.attributes.quantity) || 0);
+    const variantsOf = {};
+    for (const v of doc.included || []) {
+      if (v.type !== 'variants') continue;
+      stock[v.attributes.item_id] = (stock[v.attributes.item_id] || 0) + (Number(v.attributes.quantity) || 0);
+      (variantsOf[v.attributes.item_id] ||= []).push(v);
+    }
     for (const p of doc.data || []) {
       const a = p.attributes || {};
       if (String(a.is_hidden) === '1' || a.active !== 'yes' || !(a.price_from > 0) || /^_/.test(a.name || '')) continue;
@@ -140,6 +146,8 @@ export async function planStart(args) {
       c.url = `${shopUrl}/product/${a.url_handle}`;
       c.price = a.price_from / 100;
       c.in_stock = (stock[p.id] || 0) > 0 || a.continue_selling === 'yes';
+      const offer = offerFromVariants(variantsOf[p.id]);
+      if (offer) c.signals.on_sale = { old_price: offer.old_price, new_price: offer.new_price, percent_off: offer.percent, ends: offer.ends };
       mark(c, a);
     }
   };
@@ -150,9 +158,23 @@ export async function planStart(args) {
   fromList(newest, (c, a) => {
     if (Date.now() - Date.parse(a.date_added) <= 45 * DAY) c.signals.new_since = a.date_added.slice(0, 10);
   });
-  fromList(onSale, (c, a) => {
-    c.signals.on_sale = a.price_percent ? { percent_off: a.price_percent / 100 } : true;
+  // The store's own "sale" badge. It is not a price cut by itself (kits carry it); a real cut shows up as on_sale.
+  fromList(onSale, (c) => {
+    c.signals.sale_badge_in_store = true;
   });
+
+  // Products with a real, public price cut: rows of the active "fixed" discount campaigns.
+  try {
+    const campaigns = (await api(cfg, 'discounts', { 'filter[active]': 'yes', 'page[size]': 50 })).data || [];
+    const fixed = campaigns.filter((d) => d.attributes.discount_type === 'fixed' && !d.attributes.code).slice(0, 4);
+    const rows = (
+      await Promise.all(fixed.map((d) => api(cfg, 'product-to-discount', { 'filter[discount_id]': d.id, 'page[size]': 100, sort: '-updated_at' }).catch(() => ({ data: [] }))))
+    ).flatMap((doc) => doc.data || []);
+    const cut = [...new Set(rows.filter((r) => String(r.attributes.active) === '1' && r.attributes.save > 0).map((r) => r.attributes.product_id))].slice(0, 12);
+    for (const id of cut) candidate(Number(id)); // details (and the checked offer) are fetched below
+  } catch {
+    // discounts are a bonus signal; the plan works without them
+  }
 
   // Best sellers come from order lines: fetch their page link, price and stock.
   const missing = [...products.values()].filter((c) => !c.url);
@@ -168,7 +190,7 @@ export async function planStart(args) {
   );
 
   const candidates = [...products.values()]
-    .filter((c) => c.url && Object.keys(c.signals).length)
+    .filter((c) => c.url && Object.keys(c.signals).length && !(Object.keys(c.signals).length === 1 && c.signals.sale_badge_in_store))
     .map((c) => {
       const posted = insights?.lastPosted.get(productPath(c.url));
       c.signals.last_posted = posted?.date || null;
