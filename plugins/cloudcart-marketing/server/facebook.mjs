@@ -90,18 +90,26 @@ export async function schedulePhoto({ file, caption, at }) {
   const size = statSync(file).size;
   if (size > MAX_PHOTO_BYTES) throw fail('The image is larger than 10 MB, which Facebook does not accept.');
 
-  const form = new FormData();
-  form.set('access_token', fb.token);
-  form.set('caption', caption);
-  form.set('published', 'false'); // never publish immediately
-  form.set('scheduled_publish_time', String(Math.floor(at.getTime() / 1000)));
-  form.set('unpublished_content_type', 'SCHEDULED');
+  // Meta's documented way to schedule a post with a photo, in two steps:
+  // 1) upload the photo without publishing it, 2) create the scheduled Page post that carries it.
+  // (A single scheduled /photos call creates a photo with no timeline post, which Meta Business Suite does not list.)
+  const upload = new FormData();
+  upload.set('access_token', fb.token);
+  upload.set('published', 'false'); // never publish immediately
+  upload.set('temporary', 'true');
   const type = /\.jpe?g$/i.test(file) ? 'image/jpeg' : /\.webp$/i.test(file) ? 'image/webp' : 'image/png';
-  form.set('source', new Blob([readFileSync(file)], { type }), basename(file));
+  upload.set('source', new Blob([readFileSync(file)], { type }), basename(file));
+  const photo = await graph(`/${fb.pageId}/photos`, { method: 'POST', body: upload });
 
-  const created = await graph(`/${fb.pageId}/photos`, { method: 'POST', body: form });
-  // For a scheduled photo Facebook returns only the photo id; the post it belongs to is <page id>_<photo id>.
-  const postId = created.post_id || `${fb.pageId}_${created.id}`;
+  const post = new FormData();
+  post.set('access_token', fb.token);
+  post.set('message', caption);
+  post.set('attached_media[0]', JSON.stringify({ media_fbid: photo.id }));
+  post.set('published', 'false'); // never publish immediately
+  post.set('scheduled_publish_time', String(Math.floor(at.getTime() / 1000)));
+  post.set('unpublished_content_type', 'SCHEDULED');
+  const created = { ...(await graph(`/${fb.pageId}/feed`, { method: 'POST', body: post })), photo_id: photo.id };
+  const postId = created.id;
   // Read it back so we report what Facebook actually stored.
   let check = {};
   try {
@@ -112,7 +120,7 @@ export async function schedulePhoto({ file, caption, at }) {
   if (check.is_published === true) throw fail('Facebook published the post immediately instead of scheduling it. Check the Page now.');
   return {
     post_id: postId,
-    photo_id: created.id,
+    photo_id: created.photo_id,
     permalink: check.permalink_url || null,
     scheduled_for: new Date((check.scheduled_publish_time ? Number(check.scheduled_publish_time) : Math.floor(at.getTime() / 1000)) * 1000).toISOString(),
     page: fb.pageName || fb.pageId,
