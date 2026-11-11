@@ -5,8 +5,14 @@
 import { createInterface } from 'node:readline';
 import { RESOURCES, loadConfig, parsePath, buildSearch, getFromStore } from './lib.mjs';
 import { openConnectPage } from './connect.mjs';
+import { readFileSync } from 'node:fs';
+import { postStart, postSave, postAddImage, postShow } from './posts.mjs';
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.4.1' };
+const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
+const CARD_MIME = 'text/html;profile=mcp-app';
+const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
+
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.5.0' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
@@ -60,6 +66,102 @@ const TOOLS = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: 'post_start',
+    title: 'Start a Facebook post for a product',
+    description:
+      'First step of making a Facebook post for one product. Reads the product from the store (name, brand, category, description, price), ' +
+      'creates a working folder on this computer, downloads the product photo into it, and returns the page\'s own past posts most relevant ' +
+      'to this product (captions, engagement, image analysis), what performed well, the image template to use for the baseline variant, ' +
+      'and style reference image files copied into the folder. Does not change the store.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        product_url: { type: 'string', description: 'The product page link the user gave. Preferred.' },
+        product_id: { type: 'string', description: 'Product ID, if there is no link.' },
+        product_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'One or more product type codes for ranking examples. Call once without it to see the allowed values if unsure.',
+        },
+        template: { type: 'string', description: 'Force the baseline image template (a code from "templates"). Usually omitted.' },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: 'post_save',
+    title: 'Save a post variant',
+    description:
+      'Save one variant of the post (caption, in-image texts, image prompt) into the working folder as brief.md and brief.json, copy its reference images ' +
+      '(product photo first, then style references for the template) next to it, and run automatic checks. Returns the reference image file paths to load ' +
+      'before generating the image, and any issues to fix. Call again with the same variant to overwrite after fixing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', description: 'The "folder" returned by post_start.' },
+        variant: { type: 'string', description: '"baseline", "idea_1", "idea_2", …' },
+        template: { type: 'string', description: 'Image template code for this variant.' },
+        aspect_ratio: { type: 'string', enum: ['1:1', '4:5'] },
+        caption: { type: 'string', description: 'The Facebook caption.' },
+        image_text: {
+          type: 'array',
+          description: 'Every text element that must appear in the image.',
+          items: { type: 'object', properties: { role: { type: 'string' }, text: { type: 'string' } }, required: ['text'] },
+        },
+        image_prompt: { type: 'string', description: 'The English image-generation prompt.' },
+        notes: { type: 'string' },
+        idea: { type: 'object', description: 'For idea variants: { title, angle, hook, headline, why }.' },
+        review_issues: { type: 'array', items: { type: 'object' }, description: 'Open issues from your own review, if any.' },
+      },
+      required: ['folder', 'variant', 'caption', 'image_prompt'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'post_add_image',
+    title: 'Keep a generated image',
+    description:
+      'Copy a generated image file into a variant\'s folder as image_<n>.png (numbering continues, earlier images are kept). ' +
+      'Set reveal to true on the last image of a run to show the folder to the user.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', description: 'The "folder" returned by post_start.' },
+        variant: { type: 'string' },
+        source_path: { type: 'string', description: 'Path of the generated image file on this computer.' },
+        reveal: { type: 'boolean' },
+      },
+      required: ['folder', 'variant', 'source_path'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'post_show',
+    title: 'Show the post as a card',
+    description:
+      'Show the saved post variants to the user as a preview card: the image, the caption with a copy button, the texts to check in the image, and open issues. ' +
+      'Call it once at the end of a run, after the briefs are saved and the images are added, and again after a change. It only displays what post_save and post_add_image stored.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', description: 'The "folder" returned by post_start.' },
+        variant: { type: 'string', description: 'Variant to show first. Defaults to baseline.' },
+      },
+      required: ['folder'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    _meta: {
+      ui: { resourceUri: CARD_URI },
+      'openai/outputTemplate': CARD_URI,
+      'openai/toolInvocation/invoking': 'Preparing the preview…',
+      'openai/toolInvocation/invoked': 'Preview ready.',
+    },
   },
 ];
 
@@ -142,7 +244,7 @@ async function handle(msg) {
     case 'initialize':
       return {
         protocolVersion: msg.params?.protocolVersion || '2025-06-18',
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {} },
         serverInfo: SERVER_INFO,
         instructions:
           'Reads data from one CloudCart store through its REST API. Call cloudcart_status first. Strictly read-only.',
@@ -151,11 +253,45 @@ async function handle(msg) {
       return {};
     case 'tools/list':
       return { tools: TOOLS };
+    case 'resources/list':
+      return { resources: [CARD_RESOURCE] };
+    case 'resources/templates/list':
+      return { resourceTemplates: [] };
+    case 'resources/read': {
+      if (msg.params?.uri !== CARD_URI) throw Object.assign(new Error(`Unknown resource: ${msg.params?.uri}`), { code: -32002 });
+      return {
+        contents: [
+          {
+            uri: CARD_URI,
+            mimeType: CARD_MIME,
+            text: readFileSync(new URL('./post-card.html', import.meta.url), 'utf8'),
+            _meta: { ui: { prefersBorder: false, permissions: { clipboardWrite: {} } } },
+          },
+        ],
+      };
+    }
     case 'tools/call': {
       const name = msg.params?.name;
       if (name === 'cloudcart_status') return status();
       if (name === 'cloudcart_get') return get(msg.params?.arguments);
       if (name === 'cloudcart_connect') return connect();
+      if (name === 'post_show') {
+        try {
+          const r = postShow(msg.params?.arguments || {});
+          return { content: [{ type: 'text', text: r.summary }], structuredContent: r.structuredContent, _meta: r.meta };
+        } catch (e) {
+          return fail(e.expected ? e.message : `Something went wrong: ${e.message}`);
+        }
+      }
+      const postTool = { post_start: postStart, post_save: postSave, post_add_image: postAddImage }[name];
+      if (postTool) {
+        try {
+          return ok(JSON.stringify(await postTool(msg.params?.arguments || {})));
+        } catch (e) {
+          if (e.expected) return fail(e.message);
+          return fail(`Something went wrong: ${e.message}`);
+        }
+      }
       throw Object.assign(new Error(`Unknown tool: ${name}`), { code: -32602 });
     }
     default:

@@ -1,6 +1,6 @@
 ---
 name: store-marketing
-description: "Marketing help for a CloudCart online store. Use when the user wants to: see best sellers, slow-moving products, recent orders or customers, get campaign or promotion ideas, write product descriptions, draft a Facebook/Instagram post, draft a marketing email or newsletter, plan a sale or discount. Also: маркетинг, кампания, промоция, отстъпка, най-продавани продукти, описание на продукт, пост за Facebook, пост за Instagram, имейл до клиенти, бюлетин."
+description: "Marketing help for a CloudCart online store. Use when the user wants to: see best sellers, slow-moving products, recent orders or customers, get campaign or promotion ideas, write product descriptions, draft a marketing email or newsletter, plan a sale or discount. Also: маркетинг, кампания, промоция, отстъпка, най-продавани продукти, описание на продукт, имейл до клиенти, бюлетин."
 ---
 
 Help a CloudCart store owner with marketing, using real data from their store.
@@ -23,7 +23,7 @@ If the request is already concrete, go straight to it. Otherwise offer:
 1. **Store snapshot** — best sellers, slow movers, recent orders
 2. **Campaign or promotion ideas** based on what is selling
 3. **Product copy** — descriptions, titles, SEO text
-4. **Social media post** for a product or offer
+4. **Facebook post** for a product, with an image (use the `facebook-post` skill for this)
 5. **Email / newsletter draft**
 
 ## Step 2 — Get the data

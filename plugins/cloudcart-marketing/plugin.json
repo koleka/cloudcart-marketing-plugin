@@ -1,22 +1,22 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "cloudcart-marketing",
-  "version": "0.4.1",
-  "description": "Marketing assistant for a CloudCart store: looks at products, orders and customers, and drafts campaigns, promotions and product copy.",
+  "version": "0.5.0",
+  "description": "Marketing assistant for a CloudCart store: makes ready Facebook posts (caption and image) for a product in the page's own style, and reads products, orders and customers to suggest campaigns and promotions.",
   "keywords": ["cloudcart", "marketing", "ecommerce"],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "CloudCart Marketing",
         "shortDescription": "Marketing help for your CloudCart store",
-        "longDescription": "Connects to your CloudCart store, reads products, orders and customers, and helps with marketing: campaign ideas, promotion plans, product descriptions, email and social media drafts. It can only read from the store and never changes anything in it.",
+        "longDescription": "Connects to your CloudCart store, reads products, orders and customers, and helps with marketing: ready Facebook posts with a generated image in a few variants, campaign ideas, promotion plans, product descriptions and email drafts. It can only read from the store and never changes anything in it.",
         "developerName": "Private",
         "category": "Productivity",
         "capabilities": ["Read"],
         "defaultPrompt": [
           "Connect my CloudCart store",
           "What are my best-selling products this month?",
-          "Suggest a promotion for slow-moving products"
+          "Make a Facebook post for this product: <paste the product link>"
         ],
         "brandColor": "#ff4b51"
       }
