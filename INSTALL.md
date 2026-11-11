@@ -84,7 +84,7 @@ Say this, in their language:
 4. A page opens in the browser. Enter the store address and the API key. The key is created in the CloudCart admin under **Settings → API Keys → Create API Key**.
 5. When the page says the store is connected, go back to the chat and paste a product link with: *Make a Facebook post for this product*. Or ask, for example: *What are my best-selling products this month?*
 
-Also tell them: the plugin can only read from the store. It cannot change products, prices, orders or anything else. The store address, API key and library link can be seen and changed later on the plugin's page in ChatGPT (Plugins → CloudCart Marketing).
+Also tell them: the plugin can only read from the store. It cannot change products, prices, orders or anything else. If they later add their Facebook Page details in the settings, it can schedule a finished post on the Page, but only after they confirm each one. The store address, API key and library link can be seen and changed later on the plugin's page in ChatGPT (Plugins → CloudCart Marketing).
 
 ## Updating later
 

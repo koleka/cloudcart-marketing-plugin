@@ -387,6 +387,15 @@ function previewDataUri(file) {
   }
 }
 
+function readScheduled(dir) {
+  try {
+    const j = JSON.parse(readFileSync(join(dir, 'scheduled.json'), 'utf8'));
+    return { for: j.scheduled_for, permalink: j.permalink || null, page: j.page || null };
+  } catch {
+    return null;
+  }
+}
+
 /** post_show: everything the preview card needs. Returns { summary, structuredContent, meta }. */
 export function postShow(args) {
   const folder = checkRunFolder(args?.folder);
@@ -415,6 +424,7 @@ export function postShow(args) {
       image_text: brief.image_text || [],
       issues: (brief.review_issues || []).map((i) => (typeof i === 'string' ? i : [i.problem, i.fix].filter(Boolean).join(' → '))).filter(Boolean),
       image_file: latest,
+      scheduled: readScheduled(join(folder, name)),
     });
   }
   if (!variants.length) throw err('No saved variants in this folder yet. Call post_save first.');
@@ -422,7 +432,7 @@ export function postShow(args) {
   return {
     summary:
       `Showing a preview card with ${variants.length} variant(s): ` +
-      variants.map((v) => `${v.variant}${v.image_file ? '' : ' (no image yet)'}`).join(', ') +
+      variants.map((v) => `${v.variant}${v.image_file ? '' : ' (no image yet)'}${v.scheduled ? ` (scheduled on Facebook for ${v.scheduled.for})` : ''}`).join(', ') +
       `. Folder: ${folder}. If no card appears in this app, show the captions and image paths as text instead.`,
     structuredContent: {
       page: { name: library?.meta?.page || '' },
@@ -431,4 +441,13 @@ export function postShow(args) {
     },
     meta: { images },
   };
+}
+
+/** The folder of a saved variant, checked. Used by post_schedule. */
+export function variantFolder(args) {
+  const folder = checkRunFolder(args?.folder);
+  if (!VARIANT_RE.test(args?.variant || '')) throw err('"variant" must be "baseline", "idea_1", "idea_2", …');
+  const dir = join(folder, args.variant);
+  if (!existsSync(join(dir, 'brief.json'))) throw err('Save the brief for this variant with post_save first.');
+  return dir;
 }

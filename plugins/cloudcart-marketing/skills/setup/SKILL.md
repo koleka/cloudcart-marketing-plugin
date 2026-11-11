@@ -10,7 +10,9 @@ Get the plugin ready to use. The user runs a shop and is not a developer: answer
 1. **Store address** and **API key** (required). The key is made in the CloudCart admin under Settings → API Keys → Create API Key.
 2. **Post library link** (optional): a Google Drive link to the shop's past Facebook posts. With it, new posts follow the page's own voice and look.
 
-All three are saved only on this computer. The plugin can only read from the store.
+3. **Facebook Page ID and Page access token** (optional): only needed to schedule finished posts on the Page. The token must be allowed to create posts on the Page.
+
+Everything is saved only on this computer. The plugin can only read from the store, and it schedules a Facebook post only after the user confirms it on a confirmation page.
 
 ## Steps
 

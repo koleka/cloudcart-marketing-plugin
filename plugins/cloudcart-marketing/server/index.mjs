@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // CloudCart store MCP server (stdio). Reads from the store's REST JSON:API
-// (/api/v2) with an API key. Strictly read-only: it can only send GET requests
+// (/api/v2) with an API key. Towards the store it is strictly read-only: it can only send GET requests
 // and there is no setting to change that. No dependencies.
 import { createInterface } from 'node:readline';
 import { RESOURCES, loadConfig, saveConfig, normalizeStore, parsePath, buildSearch, getFromStore } from './lib.mjs';
@@ -9,6 +9,9 @@ import { readFileSync } from 'node:fs';
 import { postStart, postSave, postAddImage, postShow } from './posts.mjs';
 import { updatePlugin } from './update.mjs';
 import { planStart, planSave, planShow } from './plan.mjs';
+import { variantFolder } from './posts.mjs';
+import { openSchedulePage } from './schedule.mjs';
+import { loadFacebook, saveFacebook, verifyFacebook } from './facebook.mjs';
 
 const PLAN_URI = 'ui://cloudcart-marketing/plan-card-v1.html';
 const PLAN_RESOURCE = { uri: PLAN_URI, name: 'Post plan card', description: 'The week\'s planned posts with a button to make each one.', mimeType: 'text/html;profile=mcp-app' };
@@ -18,7 +21,7 @@ const CARD_URI = 'ui://cloudcart-marketing/post-card-v1.html';
 const CARD_MIME = 'text/html;profile=mcp-app';
 const CARD_RESOURCE = { uri: CARD_URI, name: 'Post preview card', description: 'Preview of a generated Facebook post: image, caption, checks.', mimeType: CARD_MIME };
 
-const SERVER_INFO = { name: 'cloudcart-store', version: '0.11.0' };
+const SERVER_INFO = { name: 'cloudcart-store', version: '0.12.0' };
 const MAX_RESULT_CHARS = 100_000;
 
 const NOT_CONFIGURED =
@@ -38,7 +41,7 @@ const TOOLS = [
     name: 'cloudcart_connect',
     title: 'Connect the CloudCart store',
     description:
-      'Open a page in the user\'s browser where they enter the store address, the API key and, optionally, a Google Drive link to their post library, to connect (or reconnect) the store. ' +
+      'Open a page in the user\'s browser where they enter the store address, the API key and, optionally, a Google Drive link to their post library and the Facebook Page ID and token for scheduling posts, to connect (or reconnect) the store. ' +
       'Use it when cloudcart_status says the store is not connected or the key was rejected, or when the user asks to connect or change the store. ' +
       'The key is typed into that page, never into the chat. Returns immediately; ask the user to say when they have finished, then call cloudcart_status.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
@@ -166,6 +169,25 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   },
   {
+    name: 'post_schedule',
+    title: 'Schedule a post on Facebook',
+    description:
+      'Prepare one saved variant (its newest image and its caption) to be scheduled on the shop\'s Facebook Page, and open a confirmation page in the user\'s browser. ' +
+      'Nothing is sent to Facebook by this tool: the user reviews the image, caption and time on that page and presses the button themselves. Posts are always scheduled for a later time, never published immediately. ' +
+      'Use only when the user asks to schedule or publish a post. Returns at once; ask the user to tell you when the page says it is scheduled, then call post_show.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        folder: { type: 'string', description: 'The "folder" returned by post_start.' },
+        variant: { type: 'string', description: '"baseline", "idea_1", …' },
+        when: { type: 'string', description: 'Proposed local date and time, "YYYY-MM-DDTHH:MM". At least 20 minutes and at most 29 days ahead. The user can change it on the page. Default: tomorrow at the same time.' },
+      },
+      required: ['folder', 'variant'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
     name: 'plan_start',
     title: 'Gather this week\'s post candidates',
     description:
@@ -250,9 +272,16 @@ const TOOLS = [
 const SETTINGS_CAPABILITY = { 'openai/settings': { readTool: 'settings_read', updateTool: 'settings_update' } };
 const KEY_SAVED = '•••••••• (saved)';
 
+function facebookStatus() {
+  const fb = loadFacebook();
+  if (fb.pageId && fb.token) return `Facebook: ready to schedule posts${fb.pageName ? ` on ${fb.pageName}` : ''} (always after the user confirms).`;
+  return 'Facebook: not set up, so posts cannot be scheduled from here yet.';
+}
+
 function settingsValues() {
   const cfg = loadConfig();
-  return { store: cfg.store || '', apiKey: cfg.apiKey ? KEY_SAVED : '', libraryUrl: getLibraryLink() };
+  const fb = loadFacebook();
+  return { store: cfg.store || '', apiKey: cfg.apiKey ? KEY_SAVED : '', libraryUrl: getLibraryLink(), fbPageId: fb.pageId || '', fbToken: fb.token ? KEY_SAVED : '' };
 }
 
 function settingsRead() {
@@ -273,18 +302,26 @@ function settingsRead() {
           description: 'Optional. A Google Drive link to your past posts, so new posts follow your page\'s voice and look. Downloads in the background after you save it.',
           maxLength: 500,
         },
+        fbPageId: { type: 'string', title: 'Facebook Page ID', description: 'Optional. The number of your Facebook Page, needed to schedule posts.', maxLength: 30 },
+        fbToken: {
+          type: 'string',
+          title: 'Facebook Page access token',
+          description: 'Optional. Lets the plugin schedule posts on the Page after you confirm each one. Saved on this computer only and shown hidden once saved.',
+          maxLength: 600,
+        },
       },
     },
     values: settingsValues(),
     layout: [
       { kind: 'group', title: 'Store', items: [{ kind: 'property', property: 'store' }, { kind: 'property', property: 'apiKey' }, { kind: 'tool', tool: 'cloudcart_status', description: 'Check that the store and the post library are working.' }] },
       { kind: 'group', title: 'Facebook posts', items: [{ kind: 'property', property: 'libraryUrl' }, { kind: 'tool', tool: 'post_library_set', description: 'Download the newest version of the post library now.' }] },
+      { kind: 'group', title: 'Facebook scheduling', items: [{ kind: 'property', property: 'fbPageId' }, { kind: 'property', property: 'fbToken' }] },
       { kind: 'group', title: 'Plugin', items: [{ kind: 'tool', tool: 'plugin_update', description: 'Install the newest version of this plugin. Restart ChatGPT afterwards.' }] },
     ],
   };
 }
 
-function settingsUpdate(args) {
+async function settingsUpdate(args) {
   const set = args?.set;
   if (!set || typeof set !== 'object' || Array.isArray(set)) throw Object.assign(new Error('"set" must be an object of changed settings.'), { expected: true });
   const cfg = loadConfig();
@@ -297,6 +334,15 @@ function settingsUpdate(args) {
   if ('apiKey' in set && String(set.apiKey).trim() && String(set.apiKey).trim() !== KEY_SAVED) apiKey = String(set.apiKey).trim();
   if (store !== cfg.store || apiKey !== cfg.apiKey) saveConfig({ store: store || '', apiKey: apiKey || '' });
   if ('libraryUrl' in set) setLibraryLink(String(set.libraryUrl));
+  if ('fbPageId' in set || 'fbToken' in set) {
+    const fb = loadFacebook();
+    const pageId = 'fbPageId' in set ? String(set.fbPageId).trim() : fb.pageId;
+    const typed = 'fbToken' in set ? String(set.fbToken).trim() : '';
+    const token = typed && typed !== KEY_SAVED ? typed : fb.token;
+    // With both in hand, check them with Facebook before saving; one alone is kept until the other arrives.
+    if (pageId && token) saveFacebook(await verifyFacebook(pageId, token));
+    else saveFacebook({ pageId, token, pageName: '' });
+  }
   return { values: settingsValues() };
 }
 
@@ -323,7 +369,7 @@ const SETTINGS_TOOLS = [
       properties: {
         set: {
           type: 'object',
-          properties: { store: { type: 'string' }, apiKey: { type: 'string' }, libraryUrl: { type: 'string' } },
+          properties: { store: { type: 'string' }, apiKey: { type: 'string' }, libraryUrl: { type: 'string' }, fbPageId: { type: 'string' }, fbToken: { type: 'string' } },
           minProperties: 1,
           additionalProperties: false,
         },
@@ -360,7 +406,7 @@ async function status() {
     if (r.status >= 400 || !r.json) return fail(`Store: ${cfg.store}. Unexpected response (HTTP ${r.status}).`);
     const count = r.json?.meta?.page?.total ?? r.json?.meta?.total_count;
     return ok(
-      `Connected to ${cfg.store}${count !== undefined ? ` (${count} products)` : ''}. Read-only: this plugin cannot change anything in the store. ${libraryStatus()}`,
+      `Connected to ${cfg.store}${count !== undefined ? ` (${count} products)` : ''}. This plugin cannot change anything in the store. ${libraryStatus()} ${facebookStatus()}`,
     );
   } catch (e) {
     return fail(`Store: ${cfg.store}. Could not reach the store: ${e.message}`);
@@ -420,7 +466,7 @@ async function handle(msg) {
         capabilities: { tools: {}, resources: {}, extensions: SETTINGS_CAPABILITY, experimental: SETTINGS_CAPABILITY },
         serverInfo: SERVER_INFO,
         instructions:
-          'Reads data from one CloudCart store through its REST API. Call cloudcart_status first. Strictly read-only.',
+          'Reads data from one CloudCart store through its REST API (strictly read-only towards the store) and helps make Facebook posts. Call cloudcart_status first. Scheduling a post on Facebook always goes through a confirmation page the user must approve.',
       };
     case 'ping':
       return {};
@@ -449,6 +495,21 @@ async function handle(msg) {
       if (name === 'cloudcart_status') return status();
       if (name === 'cloudcart_get') return get(msg.params?.arguments);
       if (name === 'cloudcart_connect') return connect();
+      if (name === 'post_schedule') {
+        try {
+          const a = msg.params?.arguments || {};
+          const when = typeof a.when === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(a.when) ? new Date(a.when.slice(0, 16)) : undefined;
+          const r = await openSchedulePage({ variantDir: variantFolder(a), variant: a.variant, when });
+          return ok(
+            (r.opened ? 'A "Schedule this post" page has opened in the browser. ' : 'Could not open the browser automatically. Give the user this link to open themselves: ') +
+              `${r.opened ? 'If it did not appear, the user can open this link: ' : ''}${r.url} ` +
+              `It shows the image, the caption, the Page (${r.page}) and the proposed time (${r.when.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })}), which they can change. ` +
+              'Nothing has been sent to Facebook yet: only the button on that page does that. Ask the user to tell you when it says the post is scheduled, then call post_show.',
+          );
+        } catch (e) {
+          return fail(e.expected ? e.message : `Something went wrong: ${e.message}`);
+        }
+      }
       if (name === 'plan_start' || name === 'plan_save') {
         try {
           return ok(JSON.stringify(await (name === 'plan_start' ? planStart : planSave)(msg.params?.arguments || {})));
@@ -474,7 +535,7 @@ async function handle(msg) {
       if (name === 'settings_read') return { content: [], structuredContent: settingsRead() };
       if (name === 'settings_update') {
         try {
-          return { content: [], structuredContent: settingsUpdate(msg.params?.arguments) };
+          return { content: [], structuredContent: await settingsUpdate(msg.params?.arguments) };
         } catch (e) {
           return fail(e.expected ? e.message : `The settings could not be saved: ${e.message}`);
         }

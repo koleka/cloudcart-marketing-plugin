@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { loadConfig, checkConnection, saveConfig } from './lib.mjs';
 import { parseDriveId, installFromLink, librarySource, getLibraryLink } from './library-sync.mjs';
+import { loadFacebook, saveFacebook, verifyFacebook } from './facebook.mjs';
 
 const LIFETIME_MS = 15 * 60 * 1000;
 let active = null; // { url, server, timer }
@@ -43,7 +44,7 @@ function openInBrowser(url) {
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-function page(currentStore, hasKey, currentLibrary) {
+function page(currentStore, hasKey, currentLibrary, fb) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -95,6 +96,12 @@ function page(currentStore, hasKey, currentLibrary) {
       <input id="library" name="library" placeholder="https://drive.google.com/file/d/…" value="${escapeHtml(currentLibrary || '')}" spellcheck="false" autocapitalize="off">
       <div class="hint" data-t="libHint">A Google Drive link to your past posts. With it, new posts follow your page's own voice and look.</div>
 
+      <label for="fbpage"><span data-t="fbPageLabel">Facebook Page ID</span> <span class="opt" data-t="optional2">(optional)</span></label>
+      <input id="fbpage" name="fbpage" inputmode="numeric" value="${escapeHtml(fb.pageId || '')}" spellcheck="false">
+      <label for="fbtoken"><span data-t="fbTokenLabel">Facebook Page access token</span> <span class="opt" data-t="optional3">(optional)</span></label>
+      <input id="fbtoken" name="fbtoken" type="password" autocomplete="off" spellcheck="false" data-saved="${fb.token ? '1' : ''}">
+      <div class="hint" data-t="fbHint">Needed only to schedule posts on your Page. Every post still waits for your confirmation.</div>
+
       <button id="btn" type="submit" data-t="button">Connect</button>
       <div id="msg" role="status"></div>
       <div class="foot" data-t="foot">The key is saved only on this computer. It is not sent to the chat.</div>
@@ -115,7 +122,10 @@ const T = {
     storeLabel: 'Store address', keyLabel: 'API key',
     keyHint: 'In your CloudCart admin: Settings → API Keys → Create API Key.',
     button: 'Connect', checking: 'Checking…', downloading: 'Checking and downloading the library… this can take a minute',
-    libLabel: 'Post library link', optional: '(optional)',
+    libLabel: 'Post library link', optional: '(optional)', optional2: '(optional)', optional3: '(optional)',
+    fbPageLabel: 'Facebook Page ID', fbTokenLabel: 'Facebook Page access token',
+    fbHint: 'Needed only to schedule posts on your Page. Every post still waits for your confirmation.',
+    fbFail: (m) => 'The store is connected, but Facebook was not saved: ' + m, fbOk: (n) => 'Facebook scheduling is ready' + (n ? ' for ' + n : '') + '.',
     libHint: 'A Google Drive link to your past posts. With it, new posts follow your page\'s own voice and look.',
     keySaved: 'A key is already saved. Leave empty to keep it.',
     libOk: (n) => 'Post library downloaded: ' + n + ' posts.',
@@ -136,7 +146,10 @@ const T = {
     storeLabel: 'Адрес на магазина', keyLabel: 'API ключ',
     keyHint: 'В администрацията на CloudCart: Настройки → API ключове → Създай API ключ.',
     button: 'Свържи', checking: 'Проверка…', downloading: 'Проверка и изтегляне на библиотеката… може да отнеме минута',
-    libLabel: 'Линк към библиотеката с постове', optional: '(по желание)',
+    libLabel: 'Линк към библиотеката с постове', optional: '(по желание)', optional2: '(по желание)', optional3: '(по желание)',
+    fbPageLabel: 'ID на Facebook страницата', fbTokenLabel: 'Facebook Page access token',
+    fbHint: 'Нужно е само за насрочване на постове във вашата страница. Всеки пост пак чака вашето потвърждение.',
+    fbFail: (m) => 'Магазинът е свързан, но Facebook не е записан: ' + m, fbOk: (n) => 'Насрочването във Facebook е готово' + (n ? ' за ' + n : '') + '.',
     libHint: 'Google Drive линк към предишните ви постове. С него новите постове следват гласа и визията на вашата страница.',
     keySaved: 'Вече има записан ключ. Оставете празно, за да го запазите.',
     libOk: (n) => 'Библиотеката с постове е изтеглена: ' + n + ' поста.',
@@ -156,6 +169,7 @@ const t = T[(navigator.language || 'en').toLowerCase().startsWith('bg') ? 'bg' :
 document.title = t.title;
 document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t[el.dataset.t]; });
 if (document.getElementById('key').dataset.saved) document.getElementById('key').placeholder = t.keySaved;
+if (document.getElementById('fbtoken').dataset.saved) document.getElementById('fbtoken').placeholder = t.keySaved;
 
 const form = document.getElementById('form'), btn = document.getElementById('btn'), msg = document.getElementById('msg');
 form.addEventListener('submit', async (e) => {
@@ -166,7 +180,7 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch(location.pathname, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ store: form.store.value, apiKey: form.key.value, libraryUrl: form.library.value }),
+      body: JSON.stringify({ store: form.store.value, apiKey: form.key.value, libraryUrl: form.library.value, fbPageId: form.fbpage.value, fbToken: form.fbtoken.value }),
     });
     result = await res.json();
   } catch {
@@ -178,6 +192,7 @@ form.addEventListener('submit', async (e) => {
     const note = document.getElementById('libnote');
     if (result.library && result.library.ok) { note.className = 'good'; note.textContent = t.libOk(result.library.posts); }
     else if (result.library) { note.className = 'warn'; note.textContent = t.libFail; }
+    if (result.facebook) { const f = document.createElement('div'); f.id = 'fbnote'; f.style.marginTop = '10px'; f.style.fontWeight = '600'; f.style.color = result.facebook.ok ? 'var(--ok)' : 'var(--err)'; f.textContent = result.facebook.ok ? t.fbOk(result.facebook.page) : t.fbFail(result.facebook.message); note.after(f); }
     document.getElementById('done').style.display = 'block';
   } else {
     msg.className = 'err'; msg.textContent = t[result.reason] || t.bad_response;
@@ -229,7 +244,7 @@ export async function openConnectPage() {
           'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'",
         });
         const saved = loadConfig();
-        res.end(page(saved.store, !!saved.apiKey, getLibraryLink()));
+        res.end(page(saved.store, !!saved.apiKey, getLibraryLink(), loadFacebook()));
         return;
       }
       if (req.method === 'POST') {
@@ -273,7 +288,23 @@ export async function openConnectPage() {
             library = { ok: false };
           }
         }
-        json(200, { ok: true, store: check.store, library });
+        // Facebook is optional too, and checked with Facebook before it is saved.
+        let facebook;
+        const fbNow = loadFacebook();
+        const fbPageId = String(body?.fbPageId || '').trim();
+        const fbToken = String(body?.fbToken || '').trim() || fbNow.token;
+        if (fbPageId && fbToken && (fbPageId !== fbNow.pageId || fbToken !== fbNow.token)) {
+          try {
+            const ok = await verifyFacebook(fbPageId, fbToken);
+            saveFacebook(ok);
+            facebook = { ok: true, page: ok.pageName };
+          } catch (e) {
+            facebook = { ok: false, message: e.expected ? e.message : 'Facebook could not be reached.' };
+          }
+        } else if (!fbPageId && fbNow.pageId) {
+          saveFacebook({ pageId: '', token: '', pageName: '' }); // field cleared: forget Facebook
+        }
+        json(200, { ok: true, store: check.store, library, facebook });
         setTimeout(close, 500); // one successful use, then the page is gone
         return;
       }

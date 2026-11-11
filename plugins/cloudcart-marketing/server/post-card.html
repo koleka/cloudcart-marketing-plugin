@@ -53,6 +53,8 @@
   .okline { color: var(--ok); font-weight: 600; }
   .idea { padding: 0 14px 8px; font-size: 13.5px; color: var(--muted); }
   .empty { padding: 28px 16px; text-align: center; color: var(--muted); }
+  .sched { padding: 9px 14px; background: var(--soft); color: var(--ok); font-weight: 600; font-size: 14px; border-top: 1px solid var(--line); }
+  .sched a { color: inherit; }
 </style>
 </head>
 <body>
@@ -62,10 +64,10 @@
   const T = {
     en: { copy: 'Copy caption', copied: 'Copied ✓', product: 'Open product page', more: 'See more', less: 'See less',
           check: 'Check the text in the image', issues: 'To double-check', noissues: 'No open issues', noimage: 'No image yet for this variant',
-          baseline: 'Main variant', idea: 'Idea', sponsored: 'Post preview', select: 'Select the caption and copy it' },
+          baseline: 'Main variant', idea: 'Idea', sponsored: 'Post preview', scheduled: 'Scheduled on Facebook for', view: 'open', select: 'Select the caption and copy it' },
     bg: { copy: 'Копирай текста', copied: 'Копирано ✓', product: 'Отвори продукта', more: 'Виж още', less: 'Виж по-малко',
           check: 'Провери текста в картинката', issues: 'За проверка', noissues: 'Няма отворени забележки', noimage: 'Все още няма картинка за този вариант',
-          baseline: 'Основен вариант', idea: 'Идея', sponsored: 'Преглед на поста', select: 'Маркирай текста и го копирай' },
+          baseline: 'Основен вариант', idea: 'Идея', sponsored: 'Преглед на поста', scheduled: 'Насрочено във Facebook за', view: 'отвори', select: 'Маркирай текста и го копирай' },
   };
   const t = T[(navigator.language || 'en').toLowerCase().startsWith('bg') ? 'bg' : 'en'];
   const root = document.getElementById('root');
@@ -175,6 +177,8 @@
       long && el('button', { class: 'more', onclick: () => { expanded = !expanded; render(); } }, expanded ? t.less : t.more),
       img ? el('img', { class: 'image', onload: reportSize, src: img, alt: (v.image_text[0] && v.image_text[0].text) || data.product.name })
           : el('div', { class: 'noimage' }, v.image_file ? v.image_file : t.noimage),
+      v.scheduled && el('div', { class: 'sched' }, '✓ ' + t.scheduled + ' ' + new Date(v.scheduled.for).toLocaleString(navigator.language || 'en', { dateStyle: 'medium', timeStyle: 'short' }),
+        v.scheduled.permalink && ' · ', v.scheduled.permalink && el('a', { href: '#', onclick: (e) => { e.preventDefault(); openLink(v.scheduled.permalink); } }, t.view)),
       el('div', { class: 'bar' }, copyBtn,
         data.product && data.product.url && el('button', { class: 'btn', onclick: () => openLink(data.product.url) }, t.product)),
       v.image_text.length > 0 && el('div', { class: 'info' }, el('h3', {}, t.check),

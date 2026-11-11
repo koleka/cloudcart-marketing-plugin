@@ -6,7 +6,7 @@ A ChatGPT / Codex plugin that gives a CloudCart store owner a marketing assistan
 - **Weekly plan**: "what should I post this week?" returns a plan of posts chosen from what is selling, new, on sale and not posted about lately, shown as a card with a button to make each post.
 - **Store questions**: best sellers, slow movers, campaign ideas, product copy and email drafts.
 
-It can only **read** from the store. It sends GET requests to the CloudCart REST API (`/api/v2`) and nothing else.
+It can only **read** from the store: it sends GET requests to the CloudCart REST API (`/api/v2`) and nothing else. The one thing it can do outside your computer is **schedule** a finished post on your Facebook Page, and only after you confirm that post on a confirmation page; it never publishes immediately.
 
 ## Install
 
@@ -16,7 +16,7 @@ The plugin runs a small local program, so it works only in the ChatGPT desktop a
 
 ## Settings
 
-The plugin has three settings: the store address, the API key and an optional post library link. They can be entered in any of these places, and all of them write the same files on that computer:
+The plugin's settings are the store address, the API key, an optional post library link, and optionally a Facebook Page ID and token for scheduling. They can be entered in any of these places, and all of them write the same files on that computer:
 
 - **The plugin's page in ChatGPT** (Plugins → CloudCart Marketing): the settings appear there with ChatGPT's own controls, plus buttons to check the connection and update the post library. The API key is shown hidden once saved.
 - **The browser page** that opens when you ask the plugin to connect the store (described below).
@@ -58,6 +58,12 @@ On the other computer the link is given once: in the plugin's settings, on the c
 
 To publish a refreshed library, replace the file in place so the link stays the same: in Drive, right-click the file → File information → Manage versions → Upload new version.
 
+## Scheduling on Facebook
+
+Optional. With a Facebook Page ID and a Page access token saved in the settings, "schedule this for tomorrow at 19:00" opens a confirmation page in the browser with the image, the caption, the Page and the time. Facebook is contacted only when you press the button on that page; the assistant cannot press it. Posts are always scheduled (20 minutes to 29 days ahead), so there is time to change or cancel them in Meta Business Suite.
+
+The token must belong to someone who can create content on the Page and carry the `pages_manage_posts`, `pages_read_engagement` and `pages_show_list` permissions. It is stored in `~/.config/cloudcart-marketing/facebook.json`, readable only by you.
+
 ## What is inside
 
 ```
@@ -70,6 +76,8 @@ plugins/cloudcart-marketing/
   server/plan.mjs                          plan_start, plan_save, plan_show (weekly post plan)
   server/plan-card.html                    the plan card
   server/offers.mjs                        active discounts and the price checks
+  server/facebook.mjs                      Facebook Page access: schedule a photo post (never publish now)
+  server/schedule.mjs                      the confirmation page for scheduling
   server/library.mjs                       ranking of past posts and style references
   server/library-sync.mjs                  download and install the library from Google Drive
   server/library-cli.mjs                   the same from the command line (used during installation)

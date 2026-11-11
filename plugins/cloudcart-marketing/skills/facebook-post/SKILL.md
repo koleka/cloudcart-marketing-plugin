@@ -9,7 +9,7 @@ Make ready Facebook posts: a caption and an image, as a main variant plus altern
 
 **The goal is sales.** People who see the post should want this product and click through to buy it. A nice-looking post that does not sell has failed. The product is the hero; the reader must understand in seconds what problem it solves for them, why this product, and that it is one click away in the shop.
 
-**Read-only.** Nothing here changes the store or publishes to Facebook. The user publishes the post themselves.
+**Nothing happens without the user.** The plugin never changes the store. It can schedule a finished post on the Facebook Page, but only when the user asks, and only after they confirm it themselves on a confirmation page. It never publishes immediately.
 
 ## The one thing that matters most for the image
 
@@ -116,6 +116,19 @@ Then write two or three lines per variant: the idea, the headline, and anything 
 - **Image change** ("make it brighter", "change the headline to …", "no model", "bigger product"): turn the request into one precise instruction in English; for new in-image text use the exact text in quotes. Update `image_text` and `image_prompt` so the change is part of the brief, add it under a line "Additional changes requested by the user (apply all; if two conflict, the later one wins):" at the end of the prompt, and `post_save` the variant again. Then repeat Step 5 for that variant, with the reference images loaded again, and Step 6. Earlier images are kept.
 - **Caption change**: rewrite the caption in the same style, `post_save` the variant again with the new caption and the same image prompt, then `post_show`.
 - **"More ideas" or a completely different direction**: go back to Step 2 for the same product, in a new `post_start` run.
+
+## Scheduling on Facebook
+
+Only when the user asks to schedule or publish a post ("насрочи го", "пусни го утре в 19:00"):
+
+1. Make sure the variant they mean has an image they are happy with and no open blocker.
+2. Work out the time. If they gave one, use it. If not, propose one from the page's best days and hours and say it. "Now" or "right away" is not possible: posts are always scheduled at least 20 minutes ahead and at most 29 days; say so and offer the earliest time.
+3. Call `post_schedule` with the `folder`, the `variant` and `when` as local time `YYYY-MM-DDTHH:MM`. It opens a confirmation page in the browser showing the image, the caption, the Page and the time. **Nothing is sent until the user presses the button there.** Tell them that in one line and ask them to tell you when it is done.
+4. When they confirm, call `post_show`: the card now shows when the post is scheduled. Remind them once that it can still be changed or cancelled in Meta Business Suite.
+
+If `post_schedule` says Facebook is not set up, explain that the Facebook Page ID and Page access token go in the plugin settings (or on the page that `cloudcart_connect` opens), and that the token needs permission to create posts on the Page. Never ask for the token in the chat.
+
+A variant can be scheduled once. To change a scheduled post, they edit or cancel it in Meta Business Suite.
 
 ## If something fails
 
